@@ -32,30 +32,23 @@
 
 ### 2.1 数据流图
 
-读法：从「用户」出发，沿 ①→⑥ 走一圈，数据就完成了一次「从产生到展示」的旅程。
+读法：从「用户」出发，沿 ①→⑦ 走一圈，数据就完成了一次「从产生到展示」的旅程。
 
 ```mermaid
 flowchart TB
-  People["用户：普通人 / 认证前辈 / 管理员"]
+  In["① 用户输入：发帖 / 评论 / 审核点击"]
+  Page["② 页面：首页 / 详情页 / 发帖页 / 审核入口<br/>（浏览器 · 前端：HTML + CSS + JavaScript）"]
+  Rule["③ 后端按身份与审核规则校验<br/>（服务器 · Node.js + Express）"]
+  Mem[("④ 内存：帖子与评论")]
+  Store[("⑤ posts.json 文件：落盘<br/>（启动读入 / 变更后落盘）")]
+  Out["⑦ 用户看到渲染好的页面"]
 
-  subgraph Browser["浏览器（前端：HTML + CSS + JavaScript）"]
-    Page["页面：首页 / 详情页 / 发帖页 / 审核入口"]
-  end
-
-  subgraph Server["服务器（后端：Node.js + Express）"]
-    Rule["按身份与审核规则校验"]
-    Mem[("内存：帖子与评论")]
-  end
-
-  File[("posts.json 文件：落盘")]
-
-  People -->|"① 输入：发帖 / 评论 / 审核点击"| Page
-  Page -->|"② 请求（带上身份）"| Rule
-  Rule -->|"③ 读"| Mem
-  Rule -->|"④ 写：存帖 / 存评论 / 改审核状态"| Mem
-  Mem <-->|"启动时读入 / 变更后落盘"| File
-  Rule -->|"⑤ 返回 JSON（已过滤掉待审核帖）"| Page
-  Page -->|"⑥ 渲染成页面"| People
+  In -->|"提交"| Page
+  Page -->|"请求（带上身份）"| Rule
+  Rule -->|"读 / 写：存帖 / 存评论 / 改审核状态"| Mem
+  Mem -->|"⑥ 返回 JSON（已过滤掉待审核帖）"| Page
+  Page -->|"渲染成页面"| Out
+  Mem -->|"落盘"| Store
 ```
 
 ### 2.2 四条链路（数据具体怎么走）
