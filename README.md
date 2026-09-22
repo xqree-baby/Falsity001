@@ -42,26 +42,32 @@ node server.js
 
 ## 文件结构
 
+```mermaid
+flowchart TD
+    R["Falsity001/（项目根）"]
+
+    R --> S["server.js<br/>后端 · 7 接口 · Day 7"]
+    R --> P["posts.json<br/>帖子+评论数据 · Day 7"]
+    R --> PU["public/<br/>前端 · Day 7"]
+    R --> IX["index.html<br/>Day 2 占位页（已被路由绕开）"]
+    R --> DOC["文档"]
+
+    DOC --> A1["AGENTS.md<br/>协作规则"]
+    DOC --> A2["PRD.md<br/>产品需求 · Day 4"]
+    DOC --> A3["TECH_DESIGN.md<br/>技术设计 · Day 5"]
+    DOC --> A4["research.md<br/>需求研究 · Day 3"]
+    DOC --> A5["TEAM_CHECKLIST.md<br/>提交检查卡 · Day 6"]
+    DOC --> A6["MVP_PLAN.md<br/>今日边界 · Day 7"]
+    DOC --> A7["README.md<br/>运行说明 · Day 7"]
+
+    PU --> F1["index.html<br/>首页"]
+    PU --> F2["post.html<br/>详情 + 评论"]
+    PU --> F3["submit.html<br/>发帖（身份切换）"]
+    PU --> F4["admin.html<br/>审核入口"]
+    PU --> F5["style.css<br/>共用样式"]
 ```
-.
-├── AGENTS.md            # 协作规则（不要删）
-├── PRD.md               # 产品需求
-├── TECH_DESIGN.md       # 技术设计
-├── MVP_PLAN.md          # 今天 MVP 的做/不做清单
-├── README.md            # 本文件
-├── TEAM_CHECKLIST.md    # 队友可勾的提交前检查卡
-├── research.md          # Day 3 需求研究
-├── index.html           # Day 2 占位页（已被 server.js 路由取代）
-├── server.js            # 后端（Node 内置 http 模块，零依赖）
-├── posts.json           # 数据：所有帖子 + 评论
-├── public/
-│   ├── index.html       # 首页
-│   ├── post.html        # 详情页
-│   ├── submit.html      # 发帖页
-│   ├── admin.html       # 审核入口
-│   └── style.css        # 共用样式
-└── .gitignore
-```
+
+> 隐藏目录 `.git/`（git 内部）、`.workbuddy/`（开发助手数据）、`.env`（凭据，已排除）不在图里。
 
 ## 数据存储
 
