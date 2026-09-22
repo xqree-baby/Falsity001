@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>帖子详情</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="app">
+    <div class="row">
+      <h1>项目 · 经验分享</h1>
+      <nav>
+        <a href="/">← 返回首页</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="container">
+    <article id="post">加载中…</article>
+
+    <section>
+      <h3>评论</h3>
+      <div id="comments"></div>
+      <form id="commentForm">
+        <label for="cAuthor">昵称（可留空，默认"匿名"）</label>
+        <input id="cAuthor" type="text" maxlength="40" placeholder="匿名">
+        <label for="cBody">内容</label>
+        <textarea id="cBody" maxlength="1000" required placeholder="说点什么…"></textarea>
+        <div class="toolbar">
+          <button type="submit">提交评论</button>
+          <span id="cStatus" class="small muted"></span>
+        </div>
+      </form>
+    </section>
+  </main>
+
+  <script>
+    const postId = location.pathname.split('/').pop();
+
+    async function load() {
+      const root = document.getElementById('post');
+      try {
+        const r = await fetch('/api/posts/' + encodeURIComponent(postId));
+        if (!r.ok) {
+          root.innerHTML = '<p class="notice error">帖子不存在或还在审核中。</p>';
+          return;
+        }
+        const data = await r.json();
+        const p = data.post;
+        const typeLabel = p.type === 'opinion' ? '观点' : '提问';
+        root.innerHTML = `
+          <h2>${escapeHtml(p.title)}</h2>
+          <div class="meta">
+            <span class="badge ${p.type}">${typeLabel}</span>
+            ${p.authorVerified ? '<span class="badge verified">✓ 已认证</span>' : '<span class="badge anonymous">未认证</span>'}
+            <span class="muted">${escapeHtml(p.author)} · ${formatDate(p.createdAt)}</span>
+          </div>
+          <div class="post-body">${escapeHtml(p.body)}</div>
+        `;
+        renderComments(p.comments);
+      } catch (e) {
+        root.innerHTML = '<p class="notice error">加载失败：' + escapeHtml(String(e)) + '</p>';
+      }
+    }
+
+    function renderComments(list) {
+      const root = document.getElementById('comments');
+      if (!list.length) {
+        root.innerHTML = '<p class="muted">还没有评论。</p>';
+        return;
+      }
+      root.innerHTML = list.map(c => `
+        <div class="comment">
+          <span class="author">${escapeHtml(c.author)}</span>
+          <span class="muted small">${formatDate(c.createdAt)}</span>
+          <div>${escapeHtml(c.body)}</div>
+        </div>
+      `).join('');
+    }
+
+    document.getElementById('commentForm').addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const status = document.getElementById('cStatus');
+      const body = document.getElementById('cBody').value.trim();
+      const author = document.getElementById('cAuthor').value.trim();
+      if (!body) { status.textContent = '内容不能为空'; return; }
+      status.textContent = '提交中…';
+      try {
+        const r = await fetch('/api/posts/' + encodeURIComponent(postId) + '/comments', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ author, body })
+        });
+        if (!r.ok) {
+          const err = await r.json().catch(() => ({}));
+          status.textContent = '失败：' + (err.error || r.status);
+          return;
+        }
+        document.getElementById('cBody').value = '';
+        status.textContent = '已提交';
+        await load();
+      } catch (e) {
+        status.textContent = '失败：' + e.message;
+      }
+    });
+
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g, c => ({
+        '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+      }[c]));
+    }
+    function formatDate(iso) {
+      try {
+        const d = new Date(iso);
+        const pad = n => String(n).padStart(2, '0');
+        return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+      } catch (e) { return iso; }
+    }
+
+    load();
+  </script>
+</body>
+</html>

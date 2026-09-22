@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>审核入口</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="app">
+    <div class="row">
+      <h1>项目 · 经验分享</h1>
+      <nav>
+        <a href="/">← 返回首页</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="container">
+    <h2>审核入口</h2>
+    <p class="muted">未认证用户提交的「提问」帖会先到这里。通过 → 上首页；拒绝 → 删除。</p>
+    <div id="list" class="toolbar-wrap"></div>
+  </main>
+
+  <script>
+    async function load() {
+      const root = document.getElementById('list');
+      root.innerHTML = '<p class="muted">加载中…</p>';
+      try {
+        const r = await fetch('/api/admin/pending');
+        const data = await r.json();
+        if (!data.posts.length) {
+          root.innerHTML = '<p class="muted">暂无待审核帖子。</p>';
+          return;
+        }
+        root.innerHTML = '';
+        for (const p of data.posts) {
+          const card = document.createElement('div');
+          card.className = 'card';
+          card.innerHTML = `
+            <h3>${escapeHtml(p.title)}</h3>
+            <div class="meta">
+              <span class="badge pending">待审核</span>
+              <span class="badge question">提问</span>
+              <span class="muted">${escapeHtml(p.author)} · ${formatDate(p.createdAt)}</span>
+            </div>
+            <div class="post-body">${escapeHtml(p.body)}</div>
+            <div class="toolbar">
+              <button data-id="${p.id}" data-action="approve">通过</button>
+              <button data-id="${p.id}" data-action="reject" class="danger">拒绝</button>
+            </div>
+          `;
+          root.appendChild(card);
+        }
+        root.querySelectorAll('button[data-action]').forEach(btn => {
+          btn.addEventListener('click', () => onAction(btn.dataset.id, btn.dataset.action));
+        });
+      } catch (e) {
+        root.innerHTML = '<p class="notice error">加载失败：' + escapeHtml(String(e)) + '</p>';
+      }
+    }
+
+    async function onAction(id, action) {
+      const label = action === 'approve' ? '通过' : '拒绝';
+      if (!confirm('确认要「' + label + '」这个帖子吗？' + (action === 'reject' ? '（会被删除）' : ''))) return;
+      try {
+        const r = await fetch('/api/admin/posts/' + encodeURIComponent(id) + '/' + action, {
+          method: 'POST',
+        });
+        if (!r.ok) {
+          const err = await r.json().catch(() => ({}));
+          alert('操作失败：' + (err.error || r.status));
+          return;
+        }
+        await load();
+      } catch (e) {
+        alert('操作失败：' + e.message);
+      }
+    }
+
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g, c => ({
+        '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+      }[c]));
+    }
+    function formatDate(iso) {
+      try {
+        const d = new Date(iso);
+        const pad = n => String(n).padStart(2, '0');
+        return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+      } catch (e) { return iso; }
+    }
+
+    load();
+  </script>
+</body>
+</html>

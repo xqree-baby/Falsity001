@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>发帖</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="app">
+    <div class="row">
+      <h1>项目 · 经验分享</h1>
+      <nav>
+        <a href="/">← 返回首页</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="container">
+    <h2>发帖</h2>
+
+    <div id="identityBar" class="identity-bar"></div>
+
+    <form id="postForm">
+      <label for="type">帖子类型</label>
+      <select id="type">
+        <option value="opinion">观点（认证用户可选）</option>
+        <option value="question">提问</option>
+      </select>
+
+      <label for="title">标题</label>
+      <input id="title" type="text" maxlength="120" required placeholder="一句话说清楚你要表达什么">
+
+      <label for="body">正文</label>
+      <textarea id="body" maxlength="4000" required placeholder="展开说…"></textarea>
+
+      <div class="toolbar">
+        <button type="submit">发布</button>
+        <span id="status" class="small muted"></span>
+      </div>
+    </form>
+
+    <p class="muted small" style="margin-top:24px;">
+      切换身份（演示用）：<a href="/submit?as=anonymous">匿名</a> ｜ <a href="/submit?as=verified">认证</a>
+    </p>
+  </main>
+
+  <script>
+    const params = new URLSearchParams(location.search);
+    const as = params.get('as') === 'verified' ? 'verified' : 'anonymous';
+
+    const bar = document.getElementById('identityBar');
+    const sel = document.getElementById('type');
+    if (as === 'verified') {
+      bar.innerHTML = '当前身份：<code>已认证用户</code>（?as=verified）。可发「观点」或「提问」，发布后直接上首页。';
+      sel.disabled = false;
+    } else {
+      bar.innerHTML = '当前身份：<code>未认证用户</code>（默认 anonymous）。只能发「提问」帖，发布后进入审核。';
+      sel.value = 'question';
+      sel.disabled = true;
+    }
+
+    document.getElementById('postForm').addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const status = document.getElementById('status');
+      const type = sel.value;
+      const title = document.getElementById('title').value.trim();
+      const body = document.getElementById('body').value.trim();
+      if (!title || !body) { status.textContent = '标题和正文都必填'; return; }
+      status.textContent = '提交中…';
+      try {
+        const r = await fetch('/api/posts?as=' + encodeURIComponent(as), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type, title, body })
+        });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) { status.textContent = '失败：' + (data.error || r.status); return; }
+        if (data.pending) {
+          status.textContent = '已提交，等待审核（不会出现在首页）。3 秒后跳首页…';
+          document.getElementById('title').value = '';
+          document.getElementById('body').value = '';
+          setTimeout(() => location.href = '/', 3000);
+        } else {
+          status.textContent = '已发布，2 秒后跳首页…';
+          document.getElementById('title').value = '';
+          document.getElementById('body').value = '';
+          setTimeout(() => location.href = '/', 2000);
+        }
+      } catch (e) {
+        status.textContent = '失败：' + e.message;
+      }
+    });
+  </script>
+</body>
+</html>

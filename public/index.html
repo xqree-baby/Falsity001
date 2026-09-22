@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>项目 · 首页</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="app">
+    <div class="row">
+      <h1>项目 · 经验分享</h1>
+      <nav>
+        <a href="/" class="active">首页</a>
+        <a href="/submit?as=anonymous">匿名发帖</a>
+        <a href="/submit?as=verified">认证发帖</a>
+        <a href="/admin">审核入口</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="container">
+    <h2>首页</h2>
+    <p class="muted">只显示已通过审核的帖子。点击查看详情。</p>
+    <div id="list" class="toolbar-wrap"></div>
+  </main>
+
+  <script>
+    async function loadList() {
+      const root = document.getElementById('list');
+      root.innerHTML = '<p class="muted">加载中…</p>';
+      try {
+        const r = await fetch('/api/posts');
+        const data = await r.json();
+        if (!data.posts.length) {
+          root.innerHTML = '<p class="muted">暂无帖子。</p>';
+          return;
+        }
+        root.innerHTML = '';
+        for (const p of data.posts) {
+          const typeLabel = p.type === 'opinion' ? '观点' : '提问';
+          const card = document.createElement('div');
+          card.className = 'card';
+          card.innerHTML = `
+            <a class="title" href="/post/${p.id}">${escapeHtml(p.title)}</a>
+            <div class="meta">
+              <span class="badge ${p.type}">${typeLabel}</span>
+              ${p.authorVerified ? '<span class="badge verified">✓ 已认证</span>' : '<span class="badge anonymous">未认证</span>'}
+              <span class="muted">${escapeHtml(p.author)} · ${formatDate(p.createdAt)}</span>
+              <span class="muted"> · ${p.comments.length} 条评论</span>
+            </div>
+          `;
+          root.appendChild(card);
+        }
+      } catch (e) {
+        root.innerHTML = '<p class="notice error">加载失败：' + escapeHtml(String(e)) + '</p>';
+      }
+    }
+
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g, c => ({
+        '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+      }[c]));
+    }
+    function formatDate(iso) {
+      try {
+        const d = new Date(iso);
+        const pad = n => String(n).padStart(2, '0');
+        return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+      } catch (e) { return iso; }
+    }
+
+    loadList();
+  </script>
+</body>
+</html>
