@@ -19,42 +19,137 @@
     </div>
   </header>
 
-  <main class="container">
+  <main class="container wide">
     <h2>首页</h2>
     <p class="muted">只显示已通过审核的帖子。点击查看详情。</p>
-    <div id="list" class="toolbar-wrap"></div>
+
+    <!-- 三栏布局：左·热门榜 / 中·帖子列表 / 右·分类筛选 -->
+    <div class="layout">
+      <aside class="side">
+        <h4>热门榜</h4>
+        <div id="hotList"></div>
+      </aside>
+
+      <div id="list" class="toolbar-wrap"></div>
+
+      <aside class="side">
+        <h4>分类</h4>
+        <div id="cats"></div>
+      </aside>
+    </div>
   </main>
 
   <script>
+    // 帖子分类（Day 8 定，参考主流职场讨论话题归纳为 6 类）
+    const CATEGORIES = ['求职面试', '职场新人', '人际沟通', '薪资福利', '晋升发展', '劳动权益'];
+
+    let allPosts = [];      // 成功加载后存在这里，切换分类不用重新请求
+    let currentCat = 'all'; // 当前选中的分类，'all' 表示全部
+
+    // 页面四种状态：加载中 → 成功（列表+热门榜+分类）/ 空 / 错误
     async function loadList() {
       const root = document.getElementById('list');
-      root.innerHTML = '<p class="muted">加载中…</p>';
+      const hotRoot = document.getElementById('hotList');
+      const catRoot = document.getElementById('cats');
+      // 状态一：加载中（骨架屏，加载完成后自动被替换）
+      root.innerHTML = '<div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div>';
+      hotRoot.innerHTML = '<p class="muted small">加载中…</p>';
+      catRoot.innerHTML = '<p class="muted small">加载中…</p>';
       try {
         const r = await fetch('/api/posts');
+        if (!r.ok) throw new Error('接口返回 ' + r.status);
         const data = await r.json();
         if (!data.posts.length) {
-          root.innerHTML = '<p class="muted">暂无帖子。</p>';
+          // 状态二：空（有页面、没数据）
+          root.innerHTML = '<div class="state-box">暂无帖子，<a href="/submit">发第一帖</a>试试</div>';
           return;
         }
-        root.innerHTML = '';
-        for (const p of data.posts) {
-          const typeLabel = p.type === 'opinion' ? '观点' : '提问';
-          const card = document.createElement('div');
-          card.className = 'card';
-          card.innerHTML = `
-            <a class="title" href="/post/${p.id}">${escapeHtml(p.title)}</a>
-            <div class="meta">
-              <span class="badge ${p.type}">${typeLabel}</span>
-              ${p.authorVerified ? '<span class="badge verified">✓ 已认证</span>' : '<span class="badge anonymous">未认证</span>'}
-              <span class="muted">${escapeHtml(p.author)} · ${formatDate(p.createdAt)}</span>
-              <span class="muted"> · ${p.comments.length} 条评论</span>
-            </div>
-          `;
-          root.appendChild(card);
-        }
+        // 状态三：成功，用 posts.json 里的假数据渲染三块内容
+        allPosts = data.posts;
+        renderHotList();
+        renderCats();
+        renderCards();
       } catch (e) {
-        root.innerHTML = '<p class="notice error">加载失败：' + escapeHtml(String(e)) + '</p>';
+        // 状态四：错误（网络断开、后端没启动等），给用户重试的机会
+        const err =
+          '<div class="state-box error">' +
+          '<div>加载失败：' + escapeHtml(String(e.message || e)) + '</div>' +
+          '<button onclick="loadList()">重试</button>' +
+          '</div>';
+        root.innerHTML = err;
+        hotRoot.innerHTML = '<p class="muted small">加载失败</p>';
+        catRoot.innerHTML = '<p class="muted small">加载失败</p>';
       }
+    }
+
+    // 左栏：热门榜，按浏览量取前 5（微博热搜式排行）
+    function renderHotList() {
+      const top = [...allPosts]
+        .sort((a, b) => (b.views || 0) - (a.views || 0))
+        .slice(0, 5);
+      document.getElementById('hotList').innerHTML = top.map((p, i) => `
+        <a class="hot-item" href="/post/${p.id}" title="${escapeHtml(p.title)}">
+          <span class="rank ${i < 3 ? 'r' + (i + 1) : ''}">${i + 1}</span>
+          <span class="hot-title">${escapeHtml(p.title)}</span>
+          <span class="hot-meta">${fmtViews(p.views)}</span>
+        </a>
+      `).join('');
+    }
+
+    // 右栏：分类筛选，每个分类显示帖子数
+    function renderCats() {
+      const catRoot = document.getElementById('cats');
+      const countOf = c => allPosts.filter(p => p.category === c).length;
+      const chips = [
+        `<button class="chip ${currentCat === 'all' ? 'active' : ''}" data-cat="all"><span>全部</span><span class="count">${allPosts.length}</span></button>`,
+        ...CATEGORIES.map(c => `
+          <button class="chip ${currentCat === c ? 'active' : ''}" data-cat="${c}">
+            <span>${c}</span><span class="count">${countOf(c)}</span>
+          </button>
+        `)
+      ];
+      catRoot.innerHTML = chips.join('');
+      catRoot.querySelectorAll('.chip').forEach(chip => {
+        chip.addEventListener('click', () => {
+          currentCat = chip.dataset.cat;
+          renderCats();   // 更新选中样式
+          renderCards();  // 重新渲染过滤后的列表
+        });
+      });
+    }
+
+    // 中栏：帖子卡片，按当前分类过滤
+    function renderCards() {
+      const root = document.getElementById('list');
+      const posts = currentCat === 'all'
+        ? allPosts
+        : allPosts.filter(p => p.category === currentCat);
+      if (!posts.length) {
+        root.innerHTML = '<div class="state-box">「' + escapeHtml(currentCat) + '」还没有帖子</div>';
+        return;
+      }
+      root.innerHTML = '';
+      for (const p of posts) {
+        const typeLabel = p.type === 'opinion' ? '观点' : '提问';
+        const card = document.createElement('div');
+        card.className = 'card';
+        card.innerHTML = `
+          <a class="title" href="/post/${p.id}">${escapeHtml(p.title)}</a>
+          <div class="meta">
+            <span class="badge ${p.type}">${typeLabel}</span>
+            ${p.authorVerified ? '<span class="badge verified">✓ 已认证</span>' : '<span class="badge anonymous">未认证</span>'}
+            <span class="badge cat">${escapeHtml(p.category || '未分类')}</span>
+            <span class="muted">${escapeHtml(p.author)} · ${formatDate(p.createdAt)}</span>
+            <span class="muted"> · ${p.comments.length} 条评论</span>
+          </div>
+        `;
+        root.appendChild(card);
+      }
+    }
+
+    function fmtViews(v) {
+      v = v || 0;
+      return v >= 1000 ? (v / 1000).toFixed(1).replace(/\.0$/, '') + 'k' : String(v);
     }
 
     function escapeHtml(s) {

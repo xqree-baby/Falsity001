@@ -24,7 +24,10 @@
       <div id="comments"></div>
       <form id="commentForm">
         <label for="cAuthor">昵称（可留空，默认"匿名"）</label>
-        <input id="cAuthor" type="text" maxlength="40" placeholder="匿名">
+        <div class="nickname-row">
+          <span id="avatarPreview" class="avatar" title="你的头像会随昵称变化"></span>
+          <input id="cAuthor" type="text" maxlength="40" placeholder="匿名">
+        </div>
         <label for="cBody">内容</label>
         <textarea id="cBody" maxlength="1000" required placeholder="说点什么…"></textarea>
         <div class="toolbar">
@@ -34,6 +37,18 @@
       </form>
     </section>
   </main>
+
+  <!-- 举报弹窗（Day 8 mock 版：只在前端演示，数据不真实上传，第 3 周接真 API 时升级） -->
+  <div id="reportModal" class="modal-overlay hidden">
+    <div class="modal-card">
+      <h3>举报这条内容</h3>
+      <div id="reportReasons"></div>
+      <div class="toolbar" style="margin-top:14px;margin-bottom:0">
+        <button id="reportSubmit" type="button">提交举报</button>
+        <button id="reportCancel" class="secondary" type="button">取消</button>
+      </div>
+    </div>
+  </div>
 
   <script>
     const postId = location.pathname.split('/').pop();
@@ -57,6 +72,9 @@
             <span class="muted">${escapeHtml(p.author)} · ${formatDate(p.createdAt)}</span>
           </div>
           <div class="post-body">${escapeHtml(p.body)}</div>
+          <div class="post-footer">
+            <button id="reportBtn" class="report-btn" type="button">举报</button>
+          </div>
         `;
         renderComments(p.comments);
       } catch (e) {
@@ -64,20 +82,46 @@
       }
     }
 
+    // 头像生成：昵称首字 + 按昵称哈希分配的冷色圆底
+    // 同一个昵称永远得到同一个颜色（没有登录系统，用这个办法保证头像稳定）
+    const AVATAR_COLORS = ['#1d4f8c', '#2f6fb2', '#146e82', '#3a6e8c', '#4c5f7d', '#64748b'];
+    function avatarFor(name) {
+      const n = (name && name.trim()) || '匿名';
+      let h = 0;
+      for (const ch of n) h = (h * 31 + ch.codePointAt(0)) >>> 0;
+      return { color: AVATAR_COLORS[h % AVATAR_COLORS.length], letter: [...n][0].toUpperCase() };
+    }
+
     function renderComments(list) {
       const root = document.getElementById('comments');
       if (!list.length) {
-        root.innerHTML = '<p class="muted">还没有评论。</p>';
+        root.innerHTML = '<div class="state-box">还没有评论，来抢沙发</div>';
         return;
       }
-      root.innerHTML = list.map(c => `
-        <div class="comment">
-          <span class="author">${escapeHtml(c.author)}</span>
-          <span class="muted small">${formatDate(c.createdAt)}</span>
-          <div>${escapeHtml(c.body)}</div>
-        </div>
-      `).join('');
+      root.innerHTML = list.map(c => {
+        const a = avatarFor(c.author);
+        return `
+          <div class="comment">
+            <span class="avatar" style="background:${a.color}">${escapeHtml(a.letter)}</span>
+            <div class="comment-main">
+              <div><span class="author">${escapeHtml(c.author)}</span><span class="muted small">${formatDate(c.createdAt)}</span></div>
+              <div>${escapeHtml(c.body)}</div>
+            </div>
+          </div>
+        `;
+      }).join('');
     }
+
+    // 评论框的实时头像预览：输入昵称时头像跟着变
+    const cAuthorInput = document.getElementById('cAuthor');
+    const avatarPreview = document.getElementById('avatarPreview');
+    function updateAvatarPreview() {
+      const a = avatarFor(cAuthorInput.value || '匿名');
+      avatarPreview.style.background = a.color;
+      avatarPreview.textContent = a.letter;
+    }
+    cAuthorInput.addEventListener('input', updateAvatarPreview);
+    updateAvatarPreview();
 
     document.getElementById('commentForm').addEventListener('submit', async (ev) => {
       ev.preventDefault();
@@ -103,6 +147,39 @@
       } catch (e) {
         status.textContent = '失败：' + e.message;
       }
+    });
+
+    // ---------- 举报（mock：前端演示版，不接真实后台） ----------
+    const REPORT_REASONS = ['垃圾广告', '人身攻击', '敏感话题', '虚假信息', '其他'];
+    let reportReason = REPORT_REASONS[0];
+
+    const reportModal = document.getElementById('reportModal');
+    document.getElementById('reportReasons').innerHTML = REPORT_REASONS.map((r, i) => `
+      <label class="reason"><input type="radio" name="reason" value="${r}" ${i === 0 ? 'checked' : ''}>${r}</label>
+    `).join('');
+    document.getElementById('reportReasons').addEventListener('change', ev => {
+      reportReason = ev.target.value;
+    });
+
+    // 举报按钮是帖子加载后才渲染出来的，脚本先于它执行，
+    // 所以这里用事件委托：监听整个页面，点到 id 为 reportBtn 的元素才算数
+    document.addEventListener('click', ev => {
+      if (ev.target && ev.target.id === 'reportBtn') reportModal.classList.remove('hidden');
+    });
+    document.getElementById('reportCancel').addEventListener('click', () => {
+      reportModal.classList.add('hidden');
+    });
+    reportModal.addEventListener('click', ev => {
+      if (ev.target === reportModal) reportModal.classList.add('hidden'); // 点遮罩关闭
+    });
+    document.getElementById('reportSubmit').addEventListener('click', () => {
+      reportModal.classList.add('hidden');
+      const footer = document.querySelector('.post-footer');
+      const tip = document.createElement('p');
+      tip.className = 'notice ok report-done';
+      tip.textContent = '已收到举报（' + reportReason + '）。演示版说明：举报数据暂不会真实上传，第 3 周接 API 后生效。';
+      footer.after(tip);
+      setTimeout(() => tip.remove(), 5000);
     });
 
     function escapeHtml(s) {
