@@ -71,6 +71,8 @@ header.app h1 {
   font-weight: 600;
   color: var(--c-blue-deep);
 }
+/* Day 9 对齐修复：三栏版首页的顶栏内容区与正文容器同宽（1160px），左右边缘对齐 */
+header.app.wide .row { max-width: 1160px; }
 header.app nav a {
   color: var(--c-ink-soft);
   font-size: 14px;
@@ -100,7 +102,7 @@ h3 { font-size: 18px; margin: 0 0 8px; }
   background: var(--c-white);
   border: 1px solid var(--c-border);
   border-radius: 10px;
-  padding: 16px 18px;
+  padding: 16px 20px;
   margin-bottom: 12px;
   transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
 }
@@ -262,7 +264,7 @@ button + button, .btn + .btn { margin-left: 8px; }
 /* ---------- 身份提示条（原黄色，改冷色） ---------- */
 .identity-bar {
   background: var(--c-blue-tint);
-  border: 1px solid #c6d8ee;
+  border: 1px solid var(--c-border);
   border-radius: 6px;
   padding: 8px 12px;
   font-size: 13px;
@@ -282,7 +284,7 @@ button + button, .btn + .btn { margin-left: 8px; }
   margin: 12px 0;
   font-size: 14px;
 }
-.notice.ok    { background: var(--c-blue-tint); color: var(--c-blue-deep); border: 1px solid #c3d7ef; }
+.notice.ok    { background: var(--c-blue-tint); color: var(--c-blue-deep); border: 1px solid var(--c-border); }
 .notice.warn  { background: #edf1f6; color: var(--c-ink-soft); border: 1px solid var(--c-border); }
 .notice.error { background: var(--c-pink-bg); color: var(--c-pink-deep); border: 1px solid var(--c-pink-line); }
 
@@ -369,7 +371,7 @@ button + button, .btn + .btn { margin-left: 8px; }
 /* 前三名序号渐变：第 1 名最深，第 3 名最淡 */
 .rank.r1 { background: #1d4f8c; color: #fff; }
 .rank.r2 { background: #2f6fb2; color: #fff; }
-.rank.r3 { background: #6f9fd0; color: #fff; }
+.rank.r3 { background: #3f79b0; color: #fff; }
 .hot-title {
   flex: 1;
   min-width: 0;
