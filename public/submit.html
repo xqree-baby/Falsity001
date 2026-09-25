@@ -21,7 +21,7 @@
 
     <div id="identityBar" class="identity-bar"></div>
 
-    <form id="postForm">
+    <form id="postForm" novalidate>
       <label for="type">帖子类型</label>
       <select id="type">
         <option value="opinion">观点（认证用户可选）</option>
@@ -60,14 +60,29 @@
       sel.disabled = true;
     }
 
+    // Day 10：表单提示分状态显示——错误=淡粉框+抖两下，成功=蓝框，过程=普通灰字
+    const status = document.getElementById('status');
+    function setStatus(text, kind) {
+      status.textContent = text;
+      if (kind === 'error') {
+        status.className = '';            // 先清掉类
+        void status.offsetWidth;          // 强制浏览器重排，这样重复报错时抖动能重新播放
+        status.className = 'notice error shake';
+      } else if (kind === 'ok') {
+        status.className = 'notice ok';
+      } else {
+        status.className = 'small muted';
+      }
+    }
+
     document.getElementById('postForm').addEventListener('submit', async (ev) => {
       ev.preventDefault();
-      const status = document.getElementById('status');
+      const sel = document.getElementById('type');
       const type = sel.value;
       const title = document.getElementById('title').value.trim();
       const body = document.getElementById('body').value.trim();
-      if (!title || !body) { status.textContent = '标题和正文都必填'; return; }
-      status.textContent = '提交中…';
+      if (!title || !body) { setStatus('标题和正文都必填', 'error'); return; }
+      setStatus('提交中…');
       try {
         const r = await fetch('/api/posts?as=' + encodeURIComponent(as), {
           method: 'POST',
@@ -75,20 +90,20 @@
           body: JSON.stringify({ type, title, body })
         });
         const data = await r.json().catch(() => ({}));
-        if (!r.ok) { status.textContent = '失败：' + (data.error || r.status); return; }
+        if (!r.ok) { setStatus('失败：' + (data.error || r.status), 'error'); return; }
         if (data.pending) {
-          status.textContent = '已提交，等待审核（不会出现在首页）。3 秒后跳首页…';
+          setStatus('已提交，等待审核（不会出现在首页）。3 秒后跳首页…', 'ok');
           document.getElementById('title').value = '';
           document.getElementById('body').value = '';
           setTimeout(() => location.href = '/', 3000);
         } else {
-          status.textContent = '已发布，2 秒后跳首页…';
+          setStatus('已发布，2 秒后跳首页…', 'ok');
           document.getElementById('title').value = '';
           document.getElementById('body').value = '';
           setTimeout(() => location.href = '/', 2000);
         }
       } catch (e) {
-        status.textContent = '失败：' + e.message;
+        setStatus('失败：' + e.message, 'error');
       }
     });
   </script>

@@ -22,7 +22,7 @@
     <section>
       <h3>评论</h3>
       <div id="comments"></div>
-      <form id="commentForm">
+      <form id="commentForm" novalidate>
         <label for="cAuthor">昵称（可留空，默认"匿名"）</label>
         <div class="nickname-row">
           <span id="avatarPreview" class="avatar" title="你的头像会随昵称变化"></span>
@@ -123,13 +123,27 @@
     cAuthorInput.addEventListener('input', updateAvatarPreview);
     updateAvatarPreview();
 
+    // Day 10：评论提示和发帖页统一——错误=淡粉框+抖两下，成功=蓝框，过程=普通灰字
+    const cStatusEl = document.getElementById('cStatus');
+    function setCStatus(text, kind) {
+      cStatusEl.textContent = text;
+      if (kind === 'error') {
+        cStatusEl.className = '';
+        void cStatusEl.offsetWidth;
+        cStatusEl.className = 'notice error shake';
+      } else if (kind === 'ok') {
+        cStatusEl.className = 'notice ok';
+      } else {
+        cStatusEl.className = 'small muted';
+      }
+    }
+
     document.getElementById('commentForm').addEventListener('submit', async (ev) => {
       ev.preventDefault();
-      const status = document.getElementById('cStatus');
       const body = document.getElementById('cBody').value.trim();
       const author = document.getElementById('cAuthor').value.trim();
-      if (!body) { status.textContent = '内容不能为空'; return; }
-      status.textContent = '提交中…';
+      if (!body) { setCStatus('内容不能为空', 'error'); return; }
+      setCStatus('提交中…');
       try {
         const r = await fetch('/api/posts/' + encodeURIComponent(postId) + '/comments', {
           method: 'POST',
@@ -138,14 +152,14 @@
         });
         if (!r.ok) {
           const err = await r.json().catch(() => ({}));
-          status.textContent = '失败：' + (err.error || r.status);
+          setCStatus('失败：' + (err.error || r.status), 'error');
           return;
         }
         document.getElementById('cBody').value = '';
-        status.textContent = '已提交';
+        setCStatus('已提交', 'ok');
         await load();
       } catch (e) {
-        status.textContent = '失败：' + e.message;
+        setCStatus('失败：' + e.message, 'error');
       }
     });
 

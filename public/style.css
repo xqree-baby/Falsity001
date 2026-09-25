@@ -288,6 +288,19 @@ button + button, .btn + .btn { margin-left: 8px; }
 .notice.warn  { background: #edf1f6; color: var(--c-ink-soft); border: 1px solid var(--c-border); }
 .notice.error { background: var(--c-pink-bg); color: var(--c-pink-deep); border: 1px solid var(--c-pink-line); }
 
+/* 表单报错时抖两下再停下（Day 10；系统关闭动画时由文末 reduced-motion 规则自动降级） */
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  20%      { transform: translateX(-6px); }
+  40%      { transform: translateX(6px); }
+  60%      { transform: translateX(-4px); }
+  80%      { transform: translateX(4px); }
+}
+.notice.error.shake { animation: shake 0.45s ease; }
+
+/* 提示框进了按钮行（.toolbar）后不吃外边距，免得把按钮挤歪 */
+.toolbar .notice { margin: 0; }
+
 /* ---------- 页面状态：加载中（骨架屏）/ 空 / 错误 ---------- */
 .skeleton {
   height: 88px;
