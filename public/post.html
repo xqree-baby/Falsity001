@@ -73,6 +73,7 @@
           </div>
           <div class="post-body">${escapeHtml(p.body)}</div>
           <div class="post-footer">
+            <button id="copyBtn" class="copy-btn" type="button">复制链接</button>
             <button id="reportBtn" class="report-btn" type="button">举报</button>
           </div>
         `;
@@ -161,6 +162,42 @@
       } catch (e) {
         setCStatus('失败：' + e.message, 'error');
       }
+    });
+
+    // ---------- 复制链接（Day 11：反馈长在动作点上——按钮自己变样） ----------
+    // 和举报按钮同理：按钮是帖子加载后才渲染的，用事件委托
+    let copyTimer = null;
+    document.addEventListener('click', async ev => {
+      const btn = ev.target && ev.target.closest && ev.target.closest('#copyBtn');
+      if (!btn) return;
+      const url = location.href;
+      let ok = true;
+      try {
+        await navigator.clipboard.writeText(url);
+      } catch (e) {
+        // 兜底：非安全上下文（比如 http 非 localhost）时 clipboard API 不可用，
+        // 退回老办法——临时塞一个透明 textarea 选中后复制
+        const ta = document.createElement('textarea');
+        ta.value = url;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        try { ok = document.execCommand('copy'); } catch (e2) { ok = false; }
+        ta.remove();
+      }
+      // 连点保护：先清掉上一次的恢复计时，状态从头算，连点不会错乱
+      clearTimeout(copyTimer);
+      if (ok) {
+        btn.classList.add('copied');
+        btn.textContent = '✓ 已复制';
+      } else {
+        btn.textContent = '复制失败，请手动复制地址栏';
+      }
+      copyTimer = setTimeout(() => {
+        btn.classList.remove('copied');
+        btn.textContent = '复制链接';
+      }, 1500);
     });
 
     // ---------- 举报（mock：前端演示版，不接真实后台） ----------
