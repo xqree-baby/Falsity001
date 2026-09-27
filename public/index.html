@@ -114,6 +114,10 @@
           currentCat = chip.dataset.cat;
           renderCats();   // 更新选中样式
           renderCards();  // 重新渲染过滤后的列表
+          // 无障碍修复（Day 12）：重渲染会销毁旧按钮导致键盘焦点丢失，
+          // 把焦点还给重渲染后同一分类的新按钮（focus + preventScroll 防页面跳动）
+          const restored = catRoot.querySelector(`.chip[data-cat="${CSS.escape(currentCat)}"]`);
+          if (restored) restored.focus({ preventScroll: true });
         });
       });
     }
