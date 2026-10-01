@@ -439,6 +439,22 @@ button + button, .btn + .btn { margin-left: 8px; }
 
 /* ---------- 帖子详情页：右下角举报 + 复制链接 ---------- */
 .post-footer { text-align: right; margin-top: 4px; }
+/* Day 14 最小修复：详情页顶部返回按钮（白底描边小按钮，复制链接同款骨架） */
+.post-topbar { margin-bottom: 10px; }
+.back-btn {
+  background: var(--c-white);
+  border: 1px solid var(--c-border);
+  color: var(--c-blue-deep);
+  font-size: 13px;
+  padding: 5px 12px;
+  border-radius: 6px;
+}
+.back-btn:hover {
+  background: var(--c-blue-tint);
+  border-color: var(--c-blue);
+  transform: none;
+  box-shadow: none;
+}
 /* 复制链接按钮（Day 11）：白底描边小按钮，和举报的虚线文字按钮区分开 */
 .copy-btn {
   background: var(--c-white);

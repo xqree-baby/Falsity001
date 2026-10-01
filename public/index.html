@@ -87,6 +87,10 @@
 
     <!-- 视图四：帖子详情（第二级，地址 #/post/p001） -->
     <section id="view-post" hidden>
+      <!-- Day 14 最小修复：常驻返回按钮——从站内进来的原路后退，直接打开详情页的回首页 -->
+      <div class="post-topbar">
+        <button id="backBtn" class="back-btn" type="button">← 返回</button>
+      </div>
       <article id="post">加载中…</article>
 
       <section>
@@ -136,6 +140,8 @@
     }
 
     // 路由表：地址 → 显示哪个 section、进视图时执行什么、顶栏哪个入口高亮
+    let lastAppPath = null;      // Day 14：上一次路由所在的站内路径（首次路由前是 null）
+    let postCameFromApp = false; // Day 14：当前详情页是否由站内导航进入
     const VIEWS = {
       '/':       { el: 'view-home',   title: '项目 · 首页', nav: 'home',   onShow: () => loadList() },
       '/submit': { el: 'view-submit', title: '发帖',       nav: 'submit', onShow: (params) => initIdentity(params) },
@@ -154,6 +160,10 @@
     function route() {
       const { path, params } = parseHash();
       const { view, postId } = resolve(path);
+      // Day 14：记录这次进详情页的来路——站内导航过来的可以 history.back() 原路返回；
+      // 直接打开 #/post/xxx（新标签/外链）没有站内上一页，返回键改成回首页
+      if (view === VIEWS['/post']) postCameFromApp = (lastAppPath !== null);
+      lastAppPath = path;
       // 显示目标视图，藏掉其余视图
       for (const key of Object.keys(VIEWS)) {
         document.getElementById(VIEWS[key].el).hidden = (VIEWS[key].el !== view.el);
@@ -437,6 +447,12 @@
 
     // ================== 视图四：帖子详情（从 post.html 迁入）==================
     let currentPostId = null;  // 当前看的帖子，进视图时由路由设置
+
+    // Day 14：返回按钮——站内进来的原路后退（保留上一页状态），直开详情页的回首页
+    document.getElementById('backBtn').addEventListener('click', () => {
+      if (postCameFromApp) history.back();
+      else location.hash = '#/';
+    });
 
     async function loadPost(postId) {
       currentPostId = postId;
