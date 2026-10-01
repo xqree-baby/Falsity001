@@ -11,35 +11,170 @@
     <div class="row">
       <h1>项目 · 经验分享</h1>
       <nav>
-        <a href="/" class="active">首页</a>
-        <a href="/submit?as=anonymous">匿名发帖</a>
-        <a href="/submit?as=verified">认证发帖</a>
-        <a href="/admin">审核入口</a>
+        <a href="#/" data-nav="home">首页</a>
+        <a href="#/submit?as=anonymous" data-nav="submit">匿名发帖</a>
+        <a href="#/submit?as=verified" data-nav="submit">认证发帖</a>
+        <a href="#/admin" data-nav="admin">审核入口</a>
       </nav>
     </div>
   </header>
 
+  <!-- Day 13：单个 HTML 里的三个独立视图，hash 路由切换（# 后变化不刷新页面） -->
   <main class="container wide">
-    <h2>首页</h2>
-    <p class="muted">只显示已通过审核的帖子。点击查看详情。</p>
 
-    <!-- 三栏布局：左·热门榜 / 中·帖子列表 / 右·分类筛选 -->
-    <div class="layout">
-      <aside class="side">
-        <h4>热门榜</h4>
-        <div id="hotList"></div>
-      </aside>
+    <!-- 视图一：首页 -->
+    <section id="view-home" hidden>
+      <h2>首页</h2>
+      <p class="muted">只显示已通过审核的帖子。点击查看详情。</p>
 
-      <div id="list" class="toolbar-wrap"></div>
+      <!-- 三栏布局：左·热门榜 / 中·帖子列表 / 右·分类筛选 -->
+      <div class="layout">
+        <aside class="side">
+          <h4>热门榜</h4>
+          <div id="hotList"></div>
+        </aside>
 
-      <aside class="side">
-        <h4>分类</h4>
-        <div id="cats"></div>
-      </aside>
-    </div>
+        <div id="list" class="toolbar-wrap"></div>
+
+        <aside class="side">
+          <h4>分类</h4>
+          <div id="cats"></div>
+        </aside>
+      </div>
+    </section>
+
+    <!-- 视图二：发帖 -->
+    <section id="view-submit" hidden>
+      <h2>发帖</h2>
+
+      <div id="identityBar" class="identity-bar"></div>
+
+      <form id="postForm" novalidate>
+        <label for="type">帖子类型</label>
+        <select id="type">
+          <option value="opinion">观点（认证用户可选）</option>
+          <option value="question">提问</option>
+        </select>
+
+        <label for="category">分类</label>
+        <select id="category">
+          <option value="">请选择分类</option>
+        </select>
+
+        <label for="title">标题</label>
+        <input id="title" type="text" maxlength="120" required placeholder="一句话说清楚你要表达什么">
+
+        <label for="body">正文</label>
+        <textarea id="body" maxlength="4000" required placeholder="展开说…"></textarea>
+
+        <div class="toolbar">
+          <button type="submit">发布</button>
+          <span id="status" class="small muted"></span>
+        </div>
+      </form>
+
+      <p class="muted small" style="margin-top:24px;">
+        切换身份（演示用）：<a href="#/submit?as=anonymous">匿名</a> ｜ <a href="#/submit?as=verified">认证</a>
+      </p>
+    </section>
+
+    <!-- 视图三：审核 -->
+    <section id="view-admin" hidden>
+      <h2>审核入口</h2>
+      <p class="muted">所有帖子发布后都先到这里（Day 13 起认证用户也不例外）。通过 → 上首页；拒绝 → 删除。按「观点 / 提问」分组显示。</p>
+      <div id="adminList" class="toolbar-wrap"></div>
+    </section>
+
+    <!-- 视图四：帖子详情（第二级，地址 #/post/p001） -->
+    <section id="view-post" hidden>
+      <article id="post">加载中…</article>
+
+      <section>
+        <h3>评论</h3>
+        <div id="comments"></div>
+        <form id="commentForm" novalidate>
+          <label for="cAuthor">昵称（可留空，默认"匿名"）</label>
+          <div class="nickname-row">
+            <span id="avatarPreview" class="avatar" title="你的头像会随昵称变化"></span>
+            <input id="cAuthor" type="text" maxlength="40" placeholder="匿名">
+          </div>
+          <label for="cBody">内容</label>
+          <textarea id="cBody" maxlength="1000" required placeholder="说点什么…"></textarea>
+          <div class="toolbar">
+            <button type="submit">提交评论</button>
+            <span id="cStatus" class="small muted"></span>
+          </div>
+        </form>
+      </section>
+    </section>
+
   </main>
 
+  <!-- 举报弹窗（Day 8 mock 版：只在前端演示，数据不真实上传，第 3 周接真 API 时升级） -->
+  <div id="reportModal" class="modal-overlay hidden">
+    <div class="modal-card">
+      <h3>举报这条内容</h3>
+      <div id="reportReasons"></div>
+      <div class="toolbar" style="margin-top:14px;margin-bottom:0">
+        <button id="reportSubmit" type="button">提交举报</button>
+        <button id="reportCancel" class="secondary" type="button">取消</button>
+      </div>
+    </div>
+  </div>
+
   <script>
+    // ================== 视图切换（Day 13：hash 路由）==================
+    // 为什么用 hash：# 后面的部分变化时浏览器不向服务器发请求、不刷新页面，
+    // JS 监听 hashchange 自己换视图。服务器零改动，刷新也不 404。
+    function parseHash() {
+      const raw = (location.hash || '#/').slice(1);  // 去掉开头的 #
+      const [path, query] = raw.split('?');
+      return {
+        path: path || '/',
+        params: new URLSearchParams(query || '')
+      };
+    }
+
+    // 路由表：地址 → 显示哪个 section、进视图时执行什么、顶栏哪个入口高亮
+    const VIEWS = {
+      '/':       { el: 'view-home',   title: '项目 · 首页', nav: 'home',   onShow: () => loadList() },
+      '/submit': { el: 'view-submit', title: '发帖',       nav: 'submit', onShow: (params) => initIdentity(params) },
+      '/admin':  { el: 'view-admin',  title: '审核入口',   nav: 'admin',  onShow: () => loadAdmin() },
+      '/post':   { el: 'view-post',   title: '帖子详情',   nav: 'home',   onShow: (postId) => loadPost(postId) },
+    };
+
+    // 地址 → 视图。/post/p001 是带参数的动态地址（第二级），
+    // 静态表查不到，单独用正则把帖子 id 抠出来
+    function resolve(path) {
+      const m = path.match(/^\/post\/([\w-]+)$/);
+      if (m) return { view: VIEWS['/post'], postId: m[1] };
+      return { view: VIEWS[path] || VIEWS['/'] };  // 未知地址回落到首页
+    }
+
+    function route() {
+      const { path, params } = parseHash();
+      const { view, postId } = resolve(path);
+      // 显示目标视图，藏掉其余视图
+      for (const key of Object.keys(VIEWS)) {
+        document.getElementById(VIEWS[key].el).hidden = (VIEWS[key].el !== view.el);
+      }
+      // 状态同步：顶栏导航高亮跟随当前视图（详情页算首页下的第二级，高亮「首页」）
+      document.querySelectorAll('header nav a[data-nav]').forEach(a => {
+        const active = a.dataset.nav === view.nav;
+        a.classList.toggle('active', active);
+        if (active) a.setAttribute('aria-current', 'page');
+        else a.removeAttribute('aria-current');
+      });
+      document.title = view.title;
+      view.onShow(postId !== undefined ? postId : params);
+    }
+
+    window.addEventListener('hashchange', route);
+    // 注意：route() 的首次调用放在脚本最末尾——
+    // 它会同步执行各视图的 onShow，必须等所有 let/const 声明都跑完再启动，
+    // 否则提前碰到现在还没声明的变量会抛「暂时性死区」错误。
+
+    // ================== 视图一：首页（Day 8 三栏 + 四种状态）==================
     // 帖子分类（Day 8 定，参考主流职场讨论话题归纳为 6 类）
     const CATEGORIES = ['求职面试', '职场新人', '人际沟通', '薪资福利', '晋升发展', '劳动权益'];
 
@@ -61,7 +196,7 @@
         const data = await r.json();
         if (!data.posts.length) {
           // 状态二：空（有页面、没数据）
-          root.innerHTML = '<div class="state-box">暂无帖子，<a href="/submit">发第一帖</a>试试</div>';
+          root.innerHTML = '<div class="state-box">暂无帖子，<a href="#/submit">发第一帖</a>试试</div>';
           return;
         }
         // 状态三：成功，用 posts.json 里的假数据渲染三块内容
@@ -88,7 +223,7 @@
         .sort((a, b) => (b.views || 0) - (a.views || 0))
         .slice(0, 5);
       document.getElementById('hotList').innerHTML = top.map((p, i) => `
-        <a class="hot-item" href="/post/${p.id}" title="${escapeHtml(p.title)}">
+        <a class="hot-item" href="#/post/${p.id}" title="${escapeHtml(p.title)}">
           <span class="rank ${i < 3 ? 'r' + (i + 1) : ''}">${i + 1}</span>
           <span class="hot-title">${escapeHtml(p.title)}</span>
           <span class="hot-meta">${fmtViews(p.views)}</span>
@@ -138,7 +273,7 @@
         const card = document.createElement('div');
         card.className = 'card';
         card.innerHTML = `
-          <a class="title" href="/post/${p.id}">${escapeHtml(p.title)}</a>
+          <a class="title" href="#/post/${p.id}">${escapeHtml(p.title)}</a>
           <div class="meta">
             <span class="badge ${p.type}">${typeLabel}</span>
             ${p.authorVerified ? '<span class="badge verified">✓ 已认证</span>' : '<span class="badge anonymous">未认证</span>'}
@@ -156,6 +291,335 @@
       return v >= 1000 ? (v / 1000).toFixed(1).replace(/\.0$/, '') + 'k' : String(v);
     }
 
+    // ================== 视图二：发帖（从 submit.html 迁入）==================
+    let as = 'anonymous';  // 当前身份，进视图时由 initIdentity 按地址设置
+
+    // 分类下拉：选项来自首页同一份 CATEGORIES 常量，只维护一处
+    const catSel = document.getElementById('category');
+    for (const c of CATEGORIES) {
+      catSel.add(new Option(c, c));
+    }
+
+    function initIdentity(params) {
+      as = params.get('as') === 'verified' ? 'verified' : 'anonymous';
+      const bar = document.getElementById('identityBar');
+      const sel = document.getElementById('type');
+      if (as === 'verified') {
+        bar.innerHTML = '当前身份：<code>已认证用户</code>（#/submit?as=verified）。可发「观点」或「提问」，发布后进入审核，通过后上首页。';
+        sel.disabled = false;
+      } else {
+        bar.innerHTML = '当前身份：<code>未认证用户</code>（默认 anonymous）。只能发「提问」帖，发布后进入审核。';
+        sel.value = 'question';
+        sel.disabled = true;
+      }
+    }
+
+    // Day 10：表单提示分状态显示——错误=淡粉框+抖两下，成功=蓝框，过程=普通灰字
+    function setStatus(text, kind) {
+      const status = document.getElementById('status');
+      status.textContent = text;
+      if (kind === 'error') {
+        status.className = '';            // 先清掉类
+        void status.offsetWidth;          // 强制浏览器重排，这样重复报错时抖动能重新播放
+        status.className = 'notice error shake';
+      } else if (kind === 'ok') {
+        status.className = 'notice ok';
+      } else {
+        status.className = 'small muted';
+      }
+    }
+
+    document.getElementById('postForm').addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const sel = document.getElementById('type');
+      const type = sel.value;
+      const title = document.getElementById('title').value.trim();
+      const body = document.getElementById('body').value.trim();
+      const category = document.getElementById('category').value;
+      if (!title || !body) { setStatus('标题和正文都必填', 'error'); return; }
+      if (!category) { setStatus('请选择分类', 'error'); return; }
+      setStatus('提交中…');
+      try {
+        const r = await fetch('/api/posts?as=' + encodeURIComponent(as), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type, title, body, category })
+        });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) { setStatus('失败：' + (data.error || r.status), 'error'); return; }
+        // Day 13 规则变更：所有帖子（含认证用户）都要审核，通过后才会出现在首页
+        setStatus('已提交，等待审核（通过后才会出现在首页）。3 秒后回首页…', 'ok');
+        document.getElementById('title').value = '';
+        document.getElementById('body').value = '';
+        document.getElementById('category').value = '';
+        setTimeout(() => location.hash = '#/', 3000);
+      } catch (e) {
+        setStatus('失败：' + e.message, 'error');
+      }
+    });
+
+    // ================== 视图三：审核（从 admin.html 迁入）==================
+    // Day 13：所有帖子都要审核，按「观点 / 提问」分组展示，方便分开把关
+    async function loadAdmin() {
+      const root = document.getElementById('adminList');
+      root.innerHTML = '<p class="muted">加载中…</p>';
+      try {
+        const r = await fetch('/api/admin/pending');
+        const data = await r.json();
+        if (!data.posts.length) {
+          root.innerHTML = '<p class="muted">暂无待审核帖子。</p>';
+          return;
+        }
+        root.innerHTML = '';
+        const groups = [
+          { key: 'opinion', label: '观点' },
+          { key: 'question', label: '提问' },
+        ];
+        for (const g of groups) {
+          const list = data.posts.filter(p => p.type === g.key);
+          const h = document.createElement('h3');
+          h.className = 'group-title';
+          h.textContent = g.label + '（' + list.length + '）';
+          root.appendChild(h);
+          if (!list.length) {
+            const empty = document.createElement('p');
+            empty.className = 'muted small group-empty';
+            empty.textContent = '（无待审核的' + g.label + '帖）';
+            root.appendChild(empty);
+            continue;
+          }
+          for (const p of list) {
+            const card = document.createElement('div');
+            card.className = 'card';
+            card.innerHTML = `
+              <h3>${escapeHtml(p.title)}</h3>
+              <div class="meta">
+                <span class="badge pending">待审核</span>
+                <span class="badge ${p.type}">${g.label}</span>
+                ${p.authorVerified ? '<span class="badge verified">✓ 已认证</span>' : '<span class="badge anonymous">未认证</span>'}
+                <span class="badge cat">${escapeHtml(p.category || '未分类')}</span>
+                <span class="muted">${escapeHtml(p.author)} · ${formatDate(p.createdAt)}</span>
+              </div>
+              <div class="post-body">${escapeHtml(p.body)}</div>
+              <div class="toolbar">
+                <button data-id="${p.id}" data-action="approve">通过</button>
+                <button data-id="${p.id}" data-action="reject" class="danger">拒绝</button>
+              </div>
+            `;
+            root.appendChild(card);
+          }
+        }
+        root.querySelectorAll('button[data-action]').forEach(btn => {
+          btn.addEventListener('click', () => onAction(btn.dataset.id, btn.dataset.action));
+        });
+      } catch (e) {
+        root.innerHTML = '<p class="notice error">加载失败：' + escapeHtml(String(e)) + '</p>';
+      }
+    }
+
+    async function onAction(id, action) {
+      const label = action === 'approve' ? '通过' : '拒绝';
+      if (!confirm('确认要「' + label + '」这个帖子吗？' + (action === 'reject' ? '（会被删除）' : ''))) return;
+      try {
+        const r = await fetch('/api/admin/posts/' + encodeURIComponent(id) + '/' + action, {
+          method: 'POST',
+        });
+        if (!r.ok) {
+          const err = await r.json().catch(() => ({}));
+          alert('操作失败：' + (err.error || r.status));
+          return;
+        }
+        await loadAdmin();
+      } catch (e) {
+        alert('操作失败：' + e.message);
+      }
+    }
+
+    // ================== 视图四：帖子详情（从 post.html 迁入）==================
+    let currentPostId = null;  // 当前看的帖子，进视图时由路由设置
+
+    async function loadPost(postId) {
+      currentPostId = postId;
+      const root = document.getElementById('post');
+      try {
+        const r = await fetch('/api/posts/' + encodeURIComponent(postId));
+        if (!r.ok) {
+          root.innerHTML = '<p class="notice error">帖子不存在或还在审核中。</p>';
+          return;
+        }
+        const data = await r.json();
+        const p = data.post;
+        const typeLabel = p.type === 'opinion' ? '观点' : '提问';
+        root.innerHTML = `
+          <h2>${escapeHtml(p.title)}</h2>
+          <div class="meta">
+            <span class="badge ${p.type}">${typeLabel}</span>
+            ${p.authorVerified ? '<span class="badge verified">✓ 已认证</span>' : '<span class="badge anonymous">未认证</span>'}
+            <span class="muted">${escapeHtml(p.author)} · ${formatDate(p.createdAt)}</span>
+          </div>
+          <div class="post-body">${escapeHtml(p.body)}</div>
+          <div class="post-footer">
+            <button id="copyBtn" class="copy-btn" type="button">复制链接</button>
+            <button id="reportBtn" class="report-btn" type="button">举报</button>
+          </div>
+        `;
+        renderComments(p.comments);
+      } catch (e) {
+        root.innerHTML = '<p class="notice error">加载失败：' + escapeHtml(String(e)) + '</p>';
+      }
+    }
+
+    // 头像生成：昵称首字 + 按昵称哈希分配的冷色圆底
+    // 同一个昵称永远得到同一个颜色（没有登录系统，用这个办法保证头像稳定）
+    const AVATAR_COLORS = ['#1d4f8c', '#2f6fb2', '#146e82', '#3a6e8c', '#4c5f7d', '#64748b'];
+    function avatarFor(name) {
+      const n = (name && name.trim()) || '匿名';
+      let h = 0;
+      for (const ch of n) h = (h * 31 + ch.codePointAt(0)) >>> 0;
+      return { color: AVATAR_COLORS[h % AVATAR_COLORS.length], letter: [...n][0].toUpperCase() };
+    }
+
+    function renderComments(list) {
+      const root = document.getElementById('comments');
+      if (!list.length) {
+        root.innerHTML = '<div class="state-box">还没有评论，来抢沙发</div>';
+        return;
+      }
+      root.innerHTML = list.map(c => {
+        const a = avatarFor(c.author);
+        return `
+          <div class="comment">
+            <span class="avatar" style="background:${a.color}">${escapeHtml(a.letter)}</span>
+            <div class="comment-main">
+              <div><span class="author">${escapeHtml(c.author)}</span><span class="muted small">${formatDate(c.createdAt)}</span></div>
+              <div>${escapeHtml(c.body)}</div>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    // 评论框的实时头像预览：输入昵称时头像跟着变
+    const cAuthorInput = document.getElementById('cAuthor');
+    const avatarPreview = document.getElementById('avatarPreview');
+    function updateAvatarPreview() {
+      const a = avatarFor(cAuthorInput.value || '匿名');
+      avatarPreview.style.background = a.color;
+      avatarPreview.textContent = a.letter;
+    }
+    cAuthorInput.addEventListener('input', updateAvatarPreview);
+    updateAvatarPreview();
+
+    // Day 10：评论提示和发帖页统一——错误=淡粉框+抖两下，成功=蓝框，过程=普通灰字
+    const cStatusEl = document.getElementById('cStatus');
+    function setCStatus(text, kind) {
+      cStatusEl.textContent = text;
+      if (kind === 'error') {
+        cStatusEl.className = '';
+        void cStatusEl.offsetWidth;
+        cStatusEl.className = 'notice error shake';
+      } else if (kind === 'ok') {
+        cStatusEl.className = 'notice ok';
+      } else {
+        cStatusEl.className = 'small muted';
+      }
+    }
+
+    document.getElementById('commentForm').addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const body = document.getElementById('cBody').value.trim();
+      const author = document.getElementById('cAuthor').value.trim();
+      if (!body) { setCStatus('内容不能为空', 'error'); return; }
+      setCStatus('提交中…');
+      try {
+        const r = await fetch('/api/posts/' + encodeURIComponent(currentPostId) + '/comments', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ author, body })
+        });
+        if (!r.ok) {
+          const err = await r.json().catch(() => ({}));
+          setCStatus('失败：' + (err.error || r.status), 'error');
+          return;
+        }
+        document.getElementById('cBody').value = '';
+        setCStatus('已提交', 'ok');
+        await loadPost(currentPostId);
+      } catch (e) {
+        setCStatus('失败：' + e.message, 'error');
+      }
+    });
+
+    // ---------- 复制链接（Day 11：反馈长在动作点上——按钮自己变样） ----------
+    // 和举报按钮同理：按钮是帖子加载后才渲染的，用事件委托
+    let copyTimer = null;
+    document.addEventListener('click', async ev => {
+      const btn = ev.target && ev.target.closest && ev.target.closest('#copyBtn');
+      if (!btn) return;
+      const url = location.href;
+      let ok = true;
+      try {
+        await navigator.clipboard.writeText(url);
+      } catch (e) {
+        // 兜底：非安全上下文（比如 http 非 localhost）时 clipboard API 不可用，
+        // 退回老办法——临时塞一个透明 textarea 选中后复制
+        const ta = document.createElement('textarea');
+        ta.value = url;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        try { ok = document.execCommand('copy'); } catch (e2) { ok = false; }
+        ta.remove();
+      }
+      // 连点保护：先清掉上一次的恢复计时，状态从头算，连点不会错乱
+      clearTimeout(copyTimer);
+      if (ok) {
+        btn.classList.add('copied');
+        btn.textContent = '✓ 已复制';
+      } else {
+        btn.textContent = '复制失败，请手动复制地址栏';
+      }
+      copyTimer = setTimeout(() => {
+        btn.classList.remove('copied');
+        btn.textContent = '复制链接';
+      }, 1500);
+    });
+
+    // ---------- 举报（mock：前端演示版，不接真实后台） ----------
+    const REPORT_REASONS = ['垃圾广告', '人身攻击', '敏感话题', '虚假信息', '其他'];
+    let reportReason = REPORT_REASONS[0];
+
+    const reportModal = document.getElementById('reportModal');
+    document.getElementById('reportReasons').innerHTML = REPORT_REASONS.map((r, i) => `
+      <label class="reason"><input type="radio" name="reason" value="${r}" ${i === 0 ? 'checked' : ''}>${r}</label>
+    `).join('');
+    document.getElementById('reportReasons').addEventListener('change', ev => {
+      reportReason = ev.target.value;
+    });
+
+    // 举报按钮是帖子加载后才渲染出来的，脚本先于它执行，
+    // 所以这里用事件委托：监听整个页面，点到 id 为 reportBtn 的元素才算数
+    document.addEventListener('click', ev => {
+      if (ev.target && ev.target.id === 'reportBtn') reportModal.classList.remove('hidden');
+    });
+    document.getElementById('reportCancel').addEventListener('click', () => {
+      reportModal.classList.add('hidden');
+    });
+    reportModal.addEventListener('click', ev => {
+      if (ev.target === reportModal) reportModal.classList.add('hidden'); // 点遮罩关闭
+    });
+    document.getElementById('reportSubmit').addEventListener('click', () => {
+      reportModal.classList.add('hidden');
+      const footer = document.querySelector('.post-footer');
+      const tip = document.createElement('p');
+      tip.className = 'notice ok report-done';
+      tip.textContent = '已收到举报（' + reportReason + '）。演示版说明：举报数据暂不会真实上传，第 3 周接 API 后生效。';
+      footer.after(tip);
+      setTimeout(() => tip.remove(), 5000);
+    });
+
+    // ================== 公共工具 ==================
     function escapeHtml(s) {
       return String(s).replace(/[&<>"']/g, c => ({
         '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
@@ -169,7 +633,8 @@
       } catch (e) { return iso; }
     }
 
-    loadList();
+    // 一切就绪，启动路由（渲染当前地址对应的视图）
+    route();
   </script>
 </body>
 </html>

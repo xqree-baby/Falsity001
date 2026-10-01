@@ -86,6 +86,16 @@ header.app nav a.active {
   border-bottom: 2px solid var(--c-blue-deep);
 }
 
+/* ---------- Day 13：审核页「观点/提问」分组标题 ---------- */
+.group-title {
+  margin: 22px 0 10px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--c-blue-deep);
+}
+.group-title:first-child { margin-top: 4px; }  /* 第一组贴近说明文字 */
+p.group-empty { margin: 0 0 8px 2px; }
+
 /* ---------- 正文区块整体入场 ---------- */
 main.container { animation: slideUp .5s ease both; }
 @keyframes slideDown { from { opacity: 0; transform: translateY(-12px); } }

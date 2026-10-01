@@ -111,12 +111,13 @@ const server = http.createServer(async (req, res) => {
     const data = await readPosts();
     const verified = url.searchParams.get('as') === 'verified';
     let type = body.type;
-    let pending = false;
     let author = body.author || '匿名网友';
+    // Day 13 规则变更（宝宝拍板）：所有帖子一律先审核、通过后上首页
+    // （原 Day 3 规则：认证用户免审直接展示）
+    const pending = true;
     if (!verified) {
-      // 未认证：强制 type=question、pending=true、作者隐藏为「匿名网友」
+      // 未认证：强制 type=question、作者隐藏为「匿名网友」
       type = 'question';
-      pending = true;
       author = '匿名网友（待审核）';
     } else {
       if (type !== 'opinion' && type !== 'question') {
@@ -132,6 +133,7 @@ const server = http.createServer(async (req, res) => {
       type,
       title: String(body.title).slice(0, 120),
       body: String(body.body).slice(0, 4000),
+      category: String(body.category || '').slice(0, 20),  // Day 13：分类必选（前端校验），空=未分类兜底
       author,
       authorVerified: verified,
       createdAt: nowIso(),
