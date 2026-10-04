@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>项目 · 首页</title>
-  <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <header class="app wide">
@@ -191,6 +191,28 @@
     let allPosts = [];      // 成功加载后存在这里，切换分类不用重新请求
     let currentCat = 'all'; // 当前选中的分类，'all' 表示全部
 
+    // Day 15：mock 版数据源——先试真接口 /api/posts（本地 server.js / 以后的真 API），
+    // 拿不到（静态托管没有后端）就回退读同目录的 posts.json。
+    // 回退时对齐 server.js 的行为：只取已过审的、按发布时间倒序。
+    let mockPostsCache = null;
+    async function fetchPosts() {
+      try {
+        const r = await fetch('/api/posts');
+        if (r.ok) return await r.json();
+      } catch (e) { /* 网络错误也落到下面的 posts.json 回退 */ }
+      if (!mockPostsCache) {
+        const r2 = await fetch('posts.json');
+        if (!r2.ok) throw new Error('接口不可用，posts.json 也读不到（' + r2.status + '）');
+        const raw = await r2.json();
+        mockPostsCache = {
+          posts: raw.posts
+            .filter(x => !x.pending)
+            .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+        };
+      }
+      return mockPostsCache;
+    }
+
     // 页面四种状态：加载中 → 成功（列表+热门榜+分类）/ 空 / 错误
     async function loadList() {
       const root = document.getElementById('list');
@@ -201,9 +223,7 @@
       hotRoot.innerHTML = '<p class="muted small">加载中…</p>';
       catRoot.innerHTML = '<p class="muted small">加载中…</p>';
       try {
-        const r = await fetch('/api/posts');
-        if (!r.ok) throw new Error('接口返回 ' + r.status);
-        const data = await r.json();
+        const data = await fetchPosts();
         if (!data.posts.length) {
           // 状态二：空（有页面、没数据）
           root.innerHTML = '<div class="state-box">暂无帖子，<a href="#/submit">发第一帖</a>试试</div>';
@@ -458,13 +478,20 @@
       currentPostId = postId;
       const root = document.getElementById('post');
       try {
-        const r = await fetch('/api/posts/' + encodeURIComponent(postId));
-        if (!r.ok) {
+        // Day 15：先试真接口；静态托管（无后端）回退到 posts.json 里找这一篇
+        let p = null;
+        try {
+          const r = await fetch('/api/posts/' + encodeURIComponent(postId));
+          if (r.ok) p = (await r.json()).post;
+        } catch (e) { /* 落到 posts.json 回退 */ }
+        if (!p) {
+          const data = await fetchPosts();
+          p = data.posts.find(x => x.id === postId) || null;
+        }
+        if (!p) {
           root.innerHTML = '<p class="notice error">帖子不存在或还在审核中。</p>';
           return;
         }
-        const data = await r.json();
-        const p = data.post;
         const typeLabel = p.type === 'opinion' ? '观点' : '提问';
         root.innerHTML = `
           <h2>${escapeHtml(p.title)}</h2>
