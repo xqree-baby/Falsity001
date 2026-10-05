@@ -3,3 +3,6 @@
 
 # WorkBuddy 工作区内部数据
 .workbuddy/
+
+# 发布应用的标记文件（自动生成，与源码无关）
+.wbapp_*.genie

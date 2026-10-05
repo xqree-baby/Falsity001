@@ -32,6 +32,14 @@
         <aside class="side">
           <h4>热门榜</h4>
           <div id="hotList"></div>
+
+          <!-- Day 17：今日热搜（真实数据，GET /api/hot；上方是站内热帖，别混） -->
+          <div class="trends-block">
+            <h4>今日热搜</h4>
+            <p class="trends-sub" id="trendsDate"></p>
+            <div class="trends-tabs" id="trendsTabs"></div>
+            <div id="trendsList"><p class="muted small">加载中…</p></div>
+          </div>
         </aside>
 
         <div id="list" class="toolbar-wrap"></div>
@@ -222,6 +230,7 @@
       root.innerHTML = '<div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div>';
       hotRoot.innerHTML = '<p class="muted small">加载中…</p>';
       catRoot.innerHTML = '<p class="muted small">加载中…</p>';
+      loadTrends();   // Day 17：热搜和帖子列表并行加载，互不阻塞
       try {
         const data = await fetchPosts();
         if (!data.posts.length) {
@@ -261,9 +270,86 @@
       `).join('');
     }
 
+    // ================== Day 17：今日热搜（真实数据）==================
+    // 数据来自云函数 GET /api/hot，读的是 Postgres 的 trends 表（微博/B站/抖音真实热搜）。
+    // 和上面的「热门榜」是两回事：热门榜排的是本站帖子，这里排的是全网热搜词条。
+    const TREND_PLATFORMS = [
+      { key: 'weibo',    label: '微博' },
+      { key: 'bilibili', label: 'B站' },
+      { key: 'douyin',   label: '抖音' },
+    ];
+    const TRENDS_API = 'https://falsity001-d1gowkogp40251a26-1499370664.ap-shanghai.app.tcloudbase.com/api/hot';
+
+    let trendsData = [];              // /api/hot 返回的原始行
+    let trendsPlatform = 'weibo';     // 当前选中的平台标签
+
+    // 热度值格式化：微博/B站是百万级数字，抖音是千万级，统一成「1.2万」这种人类看得懂的写法
+    function fmtHot(n) {
+      const v = Number(n) || 0;
+      if (v >= 100000000) return (v / 100000000).toFixed(1) + '亿';
+      if (v >= 10000) return (v / 10000).toFixed(1) + '万';
+      return String(v);
+    }
+
+    // 拉取真实热搜。失败不抛错——热搜是锦上添花，不该拖垮整个首页
+    async function loadTrends() {
+      const listRoot = document.getElementById('trendsList');
+      const tabsRoot = document.getElementById('trendsTabs');
+      const dateRoot = document.getElementById('trendsDate');
+      try {
+        const r = await fetch(TRENDS_API);
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const d = await r.json();
+        if (!d.ok) throw new Error(d.error || '接口返回 ok:false');
+        trendsData = d.data || [];
+        dateRoot.textContent = d.date + '（北京时间）';
+        // 标签上带条数，一眼看出哪个平台有数据
+        tabsRoot.innerHTML = TREND_PLATFORMS.map(p => {
+          const c = trendsData.filter(x => x.platform === p.key).length;
+          return `<button class="trends-tab ${trendsPlatform === p.key ? 'active' : ''}" data-p="${p.key}">${p.label}${c ? ' ' + c : ''}</button>`;
+        }).join('');
+        tabsRoot.querySelectorAll('.trends-tab').forEach(btn => {
+          btn.addEventListener('click', () => {
+            trendsPlatform = btn.dataset.p;
+            renderTrends();
+            // 重渲染会重建按钮，把焦点还给新按钮（沿用 Day 12 的无障碍修复思路）
+            const restored = tabsRoot.querySelector(`.trends-tab[data-p="${trendsPlatform}"]`);
+            if (restored) restored.focus({ preventScroll: true });
+          });
+        });
+        renderTrends();
+      } catch (e) {
+        // 降级（附录 F）：真实源不可用时不假装有数据，明确标注，页面其余部分照常显示
+        dateRoot.textContent = '';
+        document.getElementById('trendsTabs').innerHTML = '';
+        listRoot.innerHTML =
+          '<div class="trends-fallback">真实热搜暂不可用，以下为「示例数据」</div>' +
+          '<p class="trends-empty">接口未返回数据（' + escapeHtml(String(e.message || e)) + '）</p>';
+      }
+    }
+
+    // 渲染当前平台的前 5 条（和热门榜保持一致的条数，纵向不撑太长）
+    function renderTrends() {
+      const root = document.getElementById('trendsList');
+      const rows = trendsData
+        .filter(x => x.platform === trendsPlatform)
+        .sort((a, b) => (a.rank || 0) - (b.rank || 0))
+        .slice(0, 5);
+      if (!rows.length) {
+        root.innerHTML = '<p class="trends-empty">该平台今日暂无数据</p>';
+        return;
+      }
+      root.innerHTML = rows.map((x, i) => `
+        <div class="trends-item" title="${escapeHtml(x.title)}">
+          <span class="rank ${i < 3 ? 'r' + (i + 1) : ''}">${i + 1}</span>
+          <span class="hot-title">${escapeHtml(x.title)}</span>
+          <span class="hot-meta">${fmtHot(x.hot)}</span>
+        </div>
+      `).join('');
+    }
+
     // 右栏：分类筛选，每个分类显示帖子数
-    function renderCats() {
-      const catRoot = document.getElementById('cats');
+    function renderCats() {      const catRoot = document.getElementById('cats');
       const countOf = c => allPosts.filter(p => p.category === c).length;
       const chips = [
         `<button class="chip ${currentCat === 'all' ? 'active' : ''}" data-cat="all"><span>全部</span><span class="count">${allPosts.length}</span></button>`,
