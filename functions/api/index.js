@@ -6,19 +6,14 @@
 //   POST /api/sync       抓微博/B站/抖音真实热搜写回 trends（手动触发，判重不重复插行）
 // 运行环境：CloudBase Web 函数（必须自己 createServer + listen(9000)，不能写 exports.main）
 // 依赖：零第三方包，只用 Node 内置能力（fetch 为 Node 18+ 内置）
-// 数据库访问：CloudBase PostgreSQL 的 REST API（PostgREST 协议）
-//   地址  https://{环境ID}.api.tcloudbasegateway.com/v1/rdb/rest/{表名}?查询参数
-//   鉴权  Authorization: Bearer <API Key>
-//   Key 配在函数环境变量 CLOUDBASE_API_KEY 里——不进代码、不进仓库（规矩五.3）
-//   API Key = service_role 角色：绕过 RLS，服务端专用，绝不能下发到前端
+// 分层（Day 19）：这个文件是业务层，只管「接口该返回什么」。
+//   数据库相关的全部在同目录的 db.js 里，通过 db.findPostById() 这类调用去用，
+//   本文件里不再出现任何表名和查询语法——要改数据库写法只动 db.js 一个地方。
 // 路由兼容：网关可能把 /api/xxx 前缀剥掉再转发（Day 15 health 函数收到的是 "/"），
 //   所以 /hot 和 /api/hot 两种路径都认
 
 const http = require('http');
-
-const ENV_ID = 'falsity001-d1gowkogp40251a26';
-const DB_BASE = `https://${ENV_ID}.api.tcloudbasegateway.com/v1/rdb/rest`;
-const API_KEY = process.env.CLOUDBASE_API_KEY || '';
+const db = require('./db');
 
 const PORT = 9000; // Web 函数固定监听 9000，平台把 HTTP 请求转发进来
 
@@ -74,58 +69,7 @@ function readBody(req, limitBytes = 64 * 1024) {
   });
 }
 
-// ---------------- 数据库访问层（PostgREST） ----------------
-
-// 读表：GET /v1/rdb/rest/{表}?select=...&过滤=...&order=...
-async function dbGet(pathAndQuery) {
-  if (!API_KEY) throw new Error('CLOUDBASE_API_KEY 未配置（在云函数环境变量里加 CLOUDBASE_API_KEY）');
-  const res = await fetch(`${DB_BASE}/${pathAndQuery}`, {
-    headers: { Authorization: `Bearer ${API_KEY}`, Accept: 'application/json' },
-  });
-  if (!res.ok) throw new Error(`数据库 REST API 返回 ${res.status}：${(await res.text()).slice(0, 200)}`);
-  return res.json();
-}
-
-// upsert 写入：POST + Prefer: resolution=merge-duplicates
-// 「存在则更新、不存在则插入」，冲突判定列用查询参数 on_conflict 指定。
-// 值全部走 JSON 请求体（PostgREST 天然参数化），不存在 SQL 拼接。
-async function dbUpsertTrends(rows) {
-  if (!API_KEY) throw new Error('CLOUDBASE_API_KEY 未配置（在云函数环境变量里加 CLOUDBASE_API_KEY）');
-  const res = await fetch(`${DB_BASE}/trends?on_conflict=platform,title,date`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${API_KEY}`,
-      'Content-Type': 'application/json',
-      Prefer: 'resolution=merge-duplicates', // 重复同步不产生重复行
-    },
-    body: JSON.stringify(rows),
-  });
-  if (!res.ok) throw new Error(`数据库 REST API 返回 ${res.status}：${(await res.text()).slice(0, 200)}`);
-}
-
-// 插入 favorites 一行；PostgREST 用 Prefer: return=representation 让数据库把插入的行原样退回，
-// 这样返回给前端的 id / created_at 就是库里真实存的值，不用自己猜。
-// 重复提交不在这里判断——直接插，让 UNIQUE(post_id) 报错（见下方 handleFavorite 的 catch）。
-async function dbInsertFavorite(row) {
-  if (!API_KEY) throw new Error('CLOUDBASE_API_KEY 未配置（在云函数环境变量里加 CLOUDBASE_API_KEY）');
-  const res = await fetch(`${DB_BASE}/favorites`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${API_KEY}`,
-      'Content-Type': 'application/json',
-      Prefer: 'return=representation',
-    },
-    body: JSON.stringify([row]),
-  });
-  if (!res.ok) {
-    // 把数据库的原始报错带上去，调用方要靠它判断是「重复」还是别的错
-    const e = new Error(`数据库 REST API 返回 ${res.status}：${(await res.text()).slice(0, 300)}`);
-    e.dbStatus = res.status;
-    throw e;
-  }
-  const rows = await res.json();
-  return rows[0];
-}
+// ---------------- 收藏编号规则（业务规则，留在业务层） ----------------
 
 // 生成收藏编号：f + 时间戳 base36（如 f1a2b3c4d5）。
 // 为什么不用「查表里最大 fXXX 再 +1」：那是查完再插，两步之间有缝，
@@ -210,7 +154,7 @@ async function handleFavorite(req, res) {
 
   // 3) 确认帖子真的存在（外键 favorites_post_fk 也拦一道，但数据库报错不好读，
   //    这里先查一次，好给前端一句人话：「这篇帖子不存在」而不是「外键冲突」）
-  const [post] = await dbGet(`posts?id=eq.${encodeURIComponent(postId)}&select=id,title,pending&limit=1`);
+  const post = await db.findPostById(postId);
   if (!post) {
     logLine('favorite.reject', `post_id=${postId} 原因=帖子不存在`);
     return json(res, 404, { ok: false, error: `帖子 ${postId} 不存在` });
@@ -219,7 +163,7 @@ async function handleFavorite(req, res) {
   // 4) 写入。判重不在代码里做——直接插，让 UNIQUE(post_id) 报重复（唯一真相来源）
   const id = newFavoriteId();
   try {
-    const saved = await dbInsertFavorite({ id, post_id: postId, created_at: new Date().toISOString() });
+    const saved = await db.insertFavorite({ id, post_id: postId, created_at: new Date().toISOString() });
     logLine('favorite.ok', `id=${saved.id} post_id=${postId}`);
     return json(res, 201, {
       ok: true,
@@ -249,33 +193,35 @@ async function handleHot(req, res, query) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
     return json(res, 400, { ok: false, error: 'date 参数格式应为 YYYY-MM-DD' });
   }
-  const rows = await dbGet(
-    `trends?select=platform,title,hot,rank,date,fetched_at` +
-      `&date=eq.${date}&order=platform.asc,rank.asc&limit=200`
-  );
+  const rows = await db.findTrendsByDate(date);
   return json(res, 200, { ok: true, date, data: rows });
 }
 
 // GET /api/favorites —— 收藏列表（联表只返回已过审帖子）
 async function handleFavorites(req, res) {
-  // PostgREST 嵌套查询：posts(...) 表示顺着外键把关联帖子的字段带出来
-  // posts.pending=eq.false 过滤掉「收藏了但帖子还没过审/已进待审核」的记录
-  const rows = await dbGet(
-    `favorites?select=id,post_id,created_at,posts(title,author,author_verified,category,type)` +
-      `&posts.pending=eq.false&order=created_at.desc&limit=100`
-  );
+  const rows = await db.listFavoritesWithPosts();
   return json(res, 200, {
     ok: true,
-    data: rows.map((r) => ({
-      id: r.id,
-      post_id: r.post_id,
-      title: r.posts.title,
-      author: r.posts.author,
-      authorVerified: r.posts.author_verified,
-      category: r.posts.category,
-      type: r.posts.type,
-      savedAt: r.created_at,
-    })),
+    // ⚠️ 过滤 posts 为 null 的行（Day 19 回归抓到的 bug）
+    // 为什么必须有这行：查询里的 posts.pending=eq.false 是「让 PostgREST 顺着外键带出帖子并按过审状态过滤」，
+    //   但父行不满足条件时 PostgREST 的行为是把关联对象置成 null，而不是删掉整条收藏记录。
+    //   所以库里只要存在「收藏了但那篇帖子已被删/改待审核/未过审」的记录，
+    //   这里就会拿到一条 posts 为 null 的行，直接读 r.posts.title 抛 TypeError，
+    //   整个接口 502——连正常的那几条都看不到（不是少显示一条，是全挂）。
+    // 历史：Day 18 当天就遇到过并修过一次，但那次修复没落盘进提交（0cff7c4），线上一直带着这个雷。
+    //   Day 19 回归时库里终于出现了「收藏了待审核帖子」的数据（p003），雷爆了。
+    data: rows
+      .filter((r) => r.posts) // ← 关联对象为 null 的先扔掉，不让它进后面的 map
+      .map((r) => ({
+        id: r.id,
+        post_id: r.post_id,
+        title: r.posts.title,
+        author: r.posts.author,
+        authorVerified: r.posts.author_verified,
+        category: r.posts.category,
+        type: r.posts.type,
+        savedAt: r.created_at,
+      })),
   });
 }
 
@@ -325,7 +271,7 @@ async function handleSync(req, res) {
 
   // 写库（upsert 判重）；写失败把已抓到的平台结果一并带回，方便排查
   try {
-    await dbUpsertTrends(allRows);
+    await db.upsertTrends(allRows);
   } catch (e) {
     return json(res, 200, {
       ok: false,
