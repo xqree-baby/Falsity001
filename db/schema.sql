@@ -62,7 +62,7 @@ CREATE TABLE IF NOT EXISTS trends (
 -- 查询索引：/api/hot 按日期查、组内按排名排，走这个索引不用全表扫
 CREATE INDEX IF NOT EXISTS trends_date_rank_idx ON trends (date, platform, rank);
 
--- 收藏表：一行 = 一条收藏记录（Day 17 只读，写入接口 Day 18 做）
+-- 收藏表：一行 = 一条收藏记录（Day 17 只读；Day 18 追加写入接口 POST /api/favorites）
 CREATE TABLE IF NOT EXISTS favorites (
   id         VARCHAR(16)  PRIMARY KEY,                  -- 收藏编号，如 f001
   post_id    VARCHAR(16)  NOT NULL,                     -- ★ 关联字段：指向 posts.id
@@ -70,3 +70,16 @@ CREATE TABLE IF NOT EXISTS favorites (
   CONSTRAINT favorites_post_fk
     FOREIGN KEY (post_id) REFERENCES posts(id)          -- 外键：不能收藏不存在的帖子
 );
+
+-- ★ Day 18 追加：判重 = 一篇帖子只能被收藏一次
+--   「重复提交」由数据库挡，而不是代码先查一遍再判断：
+--   并发两个请求可能都查到「还没收藏过」然后都插进去，代码判重挡不住这种；
+--   唯一索引是数据库层面的保证，不会漏。
+--   口径说明：MVP 还没做登录系统，favorites 表没有 user_id 字段，
+--   所以只能按「帖子维度」判重。等第 3 周后段做登录时，
+--   这条索引要改成 UNIQUE (user_id, post_id)，否则两个人没法各自收藏同一篇帖。
+--   为什么用唯一索引而不是 UNIQUE 约束：
+--   PG 里唯一约束本身就是包在一个唯一索引外面的壳，强制效果完全相同；
+--   但 CREATE UNIQUE INDEX IF NOT EXISTS 天然幂等（跟本脚本其他语句风格一致），
+--   而 ADD CONSTRAINT 要额外的 DO...EXCEPTION 块兜「已经加过了」。
+CREATE UNIQUE INDEX IF NOT EXISTS favorites_post_unique_idx ON favorites (post_id);

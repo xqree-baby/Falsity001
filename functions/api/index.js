@@ -1,7 +1,8 @@
-// Day 17｜「api」云函数（Web 函数版）
-// 用途：一个函数按路径分发三个接口——
+// Day 17 建（Day 18 追加写入接口）
+// 用途：一个函数按路径分发四个接口——
 //   GET  /api/hot        今日热搜（读 trends 表）
 //   GET  /api/favorites  收藏列表（favorites 联 posts，只返回已过审帖子）
+//   POST /api/favorites  收藏一篇帖子（Day 18 新增，第一个写入接口）
 //   POST /api/sync       抓微博/B站/抖音真实热搜写回 trends（手动触发，判重不重复插行）
 // 运行环境：CloudBase Web 函数（必须自己 createServer + listen(9000)，不能写 exports.main）
 // 依赖：零第三方包，只用 Node 内置能力（fetch 为 Node 18+ 内置）
@@ -53,6 +54,26 @@ async function fetchJson(url, headers, timeoutMs = 15000) {
   }
 }
 
+// 读完请求体（Web 函数里 req 是 IncomingMessage，流要自己收完）
+// 有大小上限：防止有人 POST 一个几百 MB 的body 把函数内存吃光
+function readBody(req, limitBytes = 64 * 1024) {
+  return new Promise((resolve, reject) => {
+    let size = 0;
+    const chunks = [];
+    req.on('data', (c) => {
+      size += c.length;
+      if (size > limitBytes) {
+        reject(new Error('请求体太大'));
+        req.destroy();
+        return;
+      }
+      chunks.push(c);
+    });
+    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+    req.on('error', reject);
+  });
+}
+
 // ---------------- 数据库访问层（PostgREST） ----------------
 
 // 读表：GET /v1/rdb/rest/{表}?select=...&过滤=...&order=...
@@ -80,6 +101,45 @@ async function dbUpsertTrends(rows) {
     body: JSON.stringify(rows),
   });
   if (!res.ok) throw new Error(`数据库 REST API 返回 ${res.status}：${(await res.text()).slice(0, 200)}`);
+}
+
+// 插入 favorites 一行；PostgREST 用 Prefer: return=representation 让数据库把插入的行原样退回，
+// 这样返回给前端的 id / created_at 就是库里真实存的值，不用自己猜。
+// 重复提交不在这里判断——直接插，让 UNIQUE(post_id) 报错（见下方 handleFavorite 的 catch）。
+async function dbInsertFavorite(row) {
+  if (!API_KEY) throw new Error('CLOUDBASE_API_KEY 未配置（在云函数环境变量里加 CLOUDBASE_API_KEY）');
+  const res = await fetch(`${DB_BASE}/favorites`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${API_KEY}`,
+      'Content-Type': 'application/json',
+      Prefer: 'return=representation',
+    },
+    body: JSON.stringify([row]),
+  });
+  if (!res.ok) {
+    // 把数据库的原始报错带上去，调用方要靠它判断是「重复」还是别的错
+    const e = new Error(`数据库 REST API 返回 ${res.status}：${(await res.text()).slice(0, 300)}`);
+    e.dbStatus = res.status;
+    throw e;
+  }
+  const rows = await res.json();
+  return rows[0];
+}
+
+// 生成收藏编号：f + 时间戳 base36（如 f1a2b3c4d5）。
+// 为什么不用「查表里最大 fXXX 再 +1」：那是查完再插，两步之间有缝，
+// 并发两个请求会拿到同一个号、第二个撞主键报错。id 自己带随机性就不用查表。
+// 为什么不用自增整数：posts/comments 都沿用 p001/c001 字符串主键，保持全库风格一致。
+function newFavoriteId() {
+  return 'f' + Date.now().toString(36);
+}
+
+// ---------------- 一条日志（Day 18 余力加练：方便以后排查问题） ----------------
+// 只记「谁、做了什么、对哪条记录、成功还是被拒」，不带请求体正文——
+// 帖子内容属于用户数据，不进日志。
+function logLine(event, detail) {
+  console.log(`[${new Date().toISOString()}] [${event}] ${detail}`);
 }
 
 // ---------------- 三个平台的抓取定义（附录 F） ----------------
@@ -128,6 +188,58 @@ const PLATFORMS = [
     failHint: '抖音返回 200 但列表为空，通常是请求头缺少 Referer',
   },
 ];
+
+// POST /api/favorites —— 收藏一篇帖子（Day 18 新增：第一个写入接口）
+async function handleFavorite(req, res) {
+  // 1) 读请求体。Web 函数里 req 是 IncomingMessage，流要自己读完；空体是正常情况（用户就是没传）
+  const raw = await readBody(req);
+  let body;
+  try {
+    body = raw ? JSON.parse(raw) : {};
+  } catch (e) {
+    return json(res, 400, { ok: false, error: '请求体不是合法的 JSON' });
+  }
+
+  // 2) 校验必填字段。提示一律中文——这是完成标准之一。
+  //    顺带挡掉前端漏传/传空串/传非对象这几种脏输入，都归到同一个提示，不给用户看内部细节。
+  const postId = typeof body.post_id === 'string' ? body.post_id.trim() : '';
+  if (!postId || typeof body !== 'object' || Array.isArray(body)) {
+    logLine('favorite.reject', `原因=缺 post_id`);
+    return json(res, 400, { ok: false, error: 'post_id 必填（要收藏的帖子编号）' });
+  }
+
+  // 3) 确认帖子真的存在（外键 favorites_post_fk 也拦一道，但数据库报错不好读，
+  //    这里先查一次，好给前端一句人话：「这篇帖子不存在」而不是「外键冲突」）
+  const [post] = await dbGet(`posts?id=eq.${encodeURIComponent(postId)}&select=id,title,pending&limit=1`);
+  if (!post) {
+    logLine('favorite.reject', `post_id=${postId} 原因=帖子不存在`);
+    return json(res, 404, { ok: false, error: `帖子 ${postId} 不存在` });
+  }
+
+  // 4) 写入。判重不在代码里做——直接插，让 UNIQUE(post_id) 报重复（唯一真相来源）
+  const id = newFavoriteId();
+  try {
+    const saved = await dbInsertFavorite({ id, post_id: postId, created_at: new Date().toISOString() });
+    logLine('favorite.ok', `id=${saved.id} post_id=${postId}`);
+    return json(res, 201, {
+      ok: true,
+      favorite: {
+        id: saved.id,
+        post_id: saved.post_id,
+        title: post.title,
+        savedAt: saved.created_at,
+      },
+    });
+  } catch (e) {
+    // 409 Conflict = 唯一约束撞了 = 这篇帖子已经收藏过，这就是「重复提交被拒」
+    if (e.dbStatus === 409) {
+      logLine('favorite.reject', `id=${id} post_id=${postId} 原因=重复提交`);
+      return json(res, 409, { ok: false, error: `帖子 ${postId} 已经收藏过了，不能重复收藏` });
+    }
+    logLine('favorite.error', `post_id=${postId} 错误=${e.message}`);
+    throw e; // 交给最外层的 catch：503/502 + 原始报错
+  }
+}
 
 // ---------------- 三个接口的实现 ----------------
 
@@ -245,6 +357,7 @@ const server = http.createServer(async (req, res) => {
   try {
     if (req.method === 'GET' && path === '/hot') return await handleHot(req, res, u.searchParams);
     if (req.method === 'GET' && path === '/favorites') return await handleFavorites(req, res);
+    if (req.method === 'POST' && path === '/favorites') return await handleFavorite(req, res);
     if (req.method === 'POST' && path === '/sync') return await handleSync(req, res);
 
     // 404 时带回收到的原始路径，部署后如果路由不对，看这个字段就知道函数实际收到了什么
