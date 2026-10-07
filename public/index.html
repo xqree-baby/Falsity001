@@ -347,6 +347,13 @@
 
     // 渲染当前平台的前 5 条（和热门榜保持一致的条数，纵向不撑太长）
     function renderTrends() {
+      // Day 21 修：按钮高亮要跟着 tabs 一起换。之前 active 只在 loadTrends 生成 HTML 时写死一次，
+      // 点别的平台时列表换了、按钮还是旧平台深色——同伴交叉验证时发现的。
+      // 不重建按钮（那样会丢焦点、还得重绑事件），只翻 class，两边永远同源。
+      document.getElementById('trendsTabs').querySelectorAll('.trends-tab').forEach(b => {
+        b.classList.toggle('active', b.dataset.p === trendsPlatform);
+      });
+
       const root = document.getElementById('trendsList');
       const rows = trendsData
         .filter(x => x.platform === trendsPlatform)
@@ -581,10 +588,16 @@
       currentPostId = postId;
       const root = document.getElementById('post');
       try {
-        // Day 15：先试真接口；静态托管（无后端）回退到 posts.json 里找这一篇
+        // Day 21 修：原来这里是相对路径 fetch('/api/posts/' + id)，
+        //   请求发到静态托管自己名下，那儿没有 /api/ → 必然 404 →
+        //   p 是 null → 下面读 p.author 就抛「Cannot read properties of null」。
+        //   同伴交叉验证实测到这个报错（Day 21，详见 WEEK3_REVIEW.md）。
+        //   改成 API_BASE 绝对地址，和上面fetchPosts 同一口径。
+        //⚠️ 地址形态：网关不支持 /api/posts/{id} 这种路径参数（实测），
+        //   所以详情走固定路径 /api/post?id=xx，编号放 query。
         let p = null;
         try {
-          const r = await fetch('/api/posts/' + encodeURIComponent(postId));
+          const r = await fetch(API_BASE + '/post?id=' + encodeURIComponent(postId));
           if (r.ok) p = (await r.json()).post;
         } catch (e) { /* 落到 posts.json 回退 */ }
         if (!p) {
@@ -678,10 +691,15 @@
       if (!body) { setCStatus('内容不能为空', 'error'); return; }
       setCStatus('提交中…');
       try {
-        const r = await fetch('/api/posts/' + encodeURIComponent(currentPostId) + '/comments', {
+        // Day 21 修：原来这里是相对路径 '/api/posts/' + id + '/comments'，
+        //   请求发到静态托管自己名下（那儿没有 /api/）→ 必然 404，
+        //   同伴实测「发评论提交失败」。改成 API_BASE 绝对地址。
+        // ⚠️ 地址形态：网关不支持 /api/posts/{id}/comments 这种路径参数（实测），
+        //   改成固定路径 /api/comments，帖子编号放请求体的 post_id 字段。
+        const r = await fetch(API_BASE + '/comments', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ author, body })
+          body: JSON.stringify({ post_id: currentPostId, author, body })
         });
         if (!r.ok) {
           const err = await r.json().catch(() => ({}));

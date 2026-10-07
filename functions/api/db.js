@@ -89,6 +89,32 @@ async function findPostById(postId) {
   return rows[0];
 }
 
+// Day 21 新增：查一篇帖子的「详情页完整字段」。
+// 为什么不能直接复用 findPostById：它只 select id/title/pending 三个字段，
+//   因为收藏写入只需要判断「存不存在、审没审」；详情页要渲染正文、作者、日期，
+//   缺字段会让前端在 p.author 这种地方读到 undefined。
+// pending=eq.false：待审核的帖子不给外人看（与列表、收藏列表口径一致）。
+// 返回：帖子对象（找不到或未过审返回 undefined）。
+async function findPostForDetail(postId) {
+  const rows = await dbGet(
+    `posts?id=eq.${encodeURIComponent(postId)}&select=id,type,category,title,body,author,author_verified,views,created_at` +
+      `&pending=eq.false&limit=1`
+  );
+  return rows[0];
+}
+
+// Day 21 新增：查某篇帖子的评论列表（详情页要显示评论内容，不只是条数）。
+// 为什么单独查：帖子表里没有评论正文，评论在 comments 表，两张表只能分两次查再拼。
+// order=created_at.asc：详情页按时间正序读，跟帖「先评论后回复」的直觉一致。
+// ⚠️ 跟 countCommentsByPost 的区别：那个只数个数不取内容（列表页用，量小）；
+//   这个把 author/body 都取出来（详情页用）。别混用。
+async function findCommentsByPost(postId) {
+  return dbGet(
+    `comments?select=id,post_id,author,body,created_at` +
+      `&post_id=eq.${encodeURIComponent(postId)}&order=created_at.asc&limit=200`
+  );
+}
+
 // 查某一天的热搜。返回该日三个平台的全部词条，按平台分组、组内按排名升序。
 // 返回：[{ platform, title, hot, rank, date, fetched_at }, ...]（可能为空数组）
 async function findTrendsByDate(date) {
@@ -163,15 +189,42 @@ async function upsertTrends(rows) {
   }
 }
 
-// 只导出业务层需要的六个函数。
+// 写入一条评论（Day 21 新增：详情页发评论接真实数据库）。
+// 跟 insertFavorite 一样的套路：值全走 JSON 请求体（PostgREST 天然参数化，没有 SQL 拼接），
+//   用 Prefer: return=representation 让数据库把刚插进去的行回给我们，
+//   这样返回给前端的 id/created_at 是库里的真值，不是我们猜的。
+async function insertComment(row) {
+  requireKey();
+  const res = await fetch(`${DB_BASE}/comments`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${API_KEY}`,
+      'Content-Type': 'application/json',
+      Prefer: 'return=representation',
+    },
+    body: JSON.stringify([row]),
+  });
+  if (!res.ok) {
+    const e = new Error(`数据库 REST API 返回 ${res.status}：${(await res.text()).slice(0, 300)}`);
+    e.dbStatus = res.status;
+    throw e;
+  }
+  const rows = await res.json();
+  return rows[0];
+}
+
+// 只导出业务层需要的九个函数。
 // dbGet / requireKey / DB_BASE 这些一律不导出——业务层不该有绕过去路的办法，
-// 想查什么就从这六个里挑，或者以后真需要新的查法时在这里加一个函数。
+// 想查什么就从这八个里挑，或者以后真需要新的查法时在这里加一个函数。
 module.exports = {
   listApprovedPosts,
   countCommentsByPost,
   findPostById,
+  findPostForDetail,
+  findCommentsByPost,
   findTrendsByDate,
   listFavoritesWithPosts,
   insertFavorite,
+  insertComment,
   upsertTrends,
 };

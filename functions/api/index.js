@@ -1,10 +1,18 @@
-// Day 17 建（Day 18 追加写入接口，Day 20 追加帖子列表）
-// 用途：一个函数按路径分发五个接口——
+// Day 17 建（Day 18 追加写入接口，Day 20 追加帖子列表，Day 21 追加帖子详情与评论）
+// 用途：一个函数按路径分发七个接口——
 //   GET  /api/posts       已过审帖子列表（Day 20 新增，首页帖子区接真实数据库）
+//   GET  /api/post?id=xx  单篇帖子详情 + 该帖评论（Day 21 新增，详情页接真实数据库）
 //   GET  /api/hot        今日热搜（读 trends 表）
 //   GET  /api/favorites  收藏列表（favorites 联 posts，只返回已过审帖子）
 //   POST /api/favorites  收藏一篇帖子（Day 18 新增，第一个写入接口）
+//   POST /api/comments   发一条评论（Day 21 新增，post_id 放请求体）
 //   POST /api/sync       抓微博/B站/抖音真实热搜写回 trends（手动触发，判重不重复插行）
+//
+// ⚠️ 为什么详情和评论不用 /api/posts/:id 这种形态（2026-10-07 实测）：
+//   CloudBase HTTP 网关**不支持 {id} 路径参数**，只认固定路径；
+//   而 /api/posts 已被 Day 20 的列表接口占用，改不成 /api/posts/{id}。
+//   → 另起固定路径 /api/post?id=xx 和 /api/comments，编号放 query / 请求体。
+//   （query 参数是可行的：Day 17 的 /api/hot?date=2026-10-05 一直正常工作。）
 // 运行环境：CloudBase Web 函数（必须自己 createServer + listen(9000)，不能写 exports.main）
 // 依赖：零第三方包，只用 Node 内置能力（fetch 为 Node 18+ 内置）
 // 分层（Day 19）：这个文件是业务层，只管「接口该返回什么」。
@@ -91,6 +99,14 @@ function readBody(req, limitBytes = 64 * 1024) {
 // 为什么不用自增整数：posts/comments 都沿用 p001/c001 字符串主键，保持全库风格一致。
 function newFavoriteId() {
   return 'f' + Date.now().toString(36);
+}
+
+// ---------------- 评论编号规则（Day 21 新增，业务规则留业务层） ----------------
+
+// 生成评论编号：c + 时间戳 base36（如 c1a2b3c4d5）。理由同 newFavoriteId：
+//   不查表取最大号 +1（查完再插有缝，并发会撞主键），id 自带随机性就不用查表。
+function newCommentId() {
+  return 'c' + Date.now().toString(36);
 }
 
 // ---------------- 一条日志（Day 18 余力加练：方便以后排查问题） ----------------
@@ -240,6 +256,131 @@ async function handlePosts(req, res) {
   });
 }
 
+// GET /api/posts/:id —— 单篇帖子详情（Day 21 新增）
+//
+// 背景：Day 21 同伴交叉验证抓出来的第一个真 bug。
+//   详情页在 index.html 里写的是相对路径 fetch('/api/posts/' + id)，
+//   页面跑在静态托管域名上，这个相对路径请求发到静态托管自己那儿，
+//   静态托管里没有 /api/ → 必然 404 → 页面 catch 里 p 是 null，
+//   再读p.author 就抛「Cannot read properties of null」。
+//   前端 Day 20 改过API_BASE，但那两处漏了；后端也压根没注册这条路由。
+//
+// 为什么评论要单独查、然后拼进 post.comments：
+//   帖子表里没有评论正文（Day 20 列表接口的 comments 是空数组占位，只为数条数用的）。
+//   详情页要显示评论内容，所以这里查第二张表再挂到 post.comments 上——
+//   这样前端的 renderComments(p.comments) 不用改，形状和读假数据时一样。
+async function handlePostDetail(req, res, postId) {
+  const row = await db.findPostForDetail(postId);
+  // 找不到 和 待审核 返回同一个 404：
+  //   故意不区分——「待审核」不该告诉外人这篇存在但看不到。
+  if (!row) {
+    return json(res, 404, { ok: false, error: '帖子不存在或还在审核中' });
+  }
+
+  // 评论查不到要让帖子照常显示（评论是附加信息，不该拖垮正文）
+  let comments = [];
+  try {
+    const rows = await db.findCommentsByPost(postId);
+    comments = rows.map((c) => ({
+      id: c.id,
+      postId: c.post_id,
+      author: c.author,
+      body: c.body,
+      createdAt: c.created_at,
+    }));
+  } catch (e) {
+    console.log(`[postDetail] 评论查询失败，帖子照常返回、评论区显示为空：${e.message}`);
+  }
+
+  return json(res, 200, {
+    ok: true,
+    post: {
+      id: row.id,
+      type: row.type,
+      category: row.category,
+      title: row.title,
+      body: row.body,
+      author: row.author,
+      authorVerified: row.author_verified,
+      views: row.views,
+      createdAt: row.created_at,
+      comments,
+    },
+  });
+}
+
+// POST /api/comments —— 发一条评论（Day 21 新增）
+//
+// 同伴验证的第二个失败点：发评论返回 404。
+//   原因和详情页一样——前端用了相对路径，且后端压根没注册这条路由。
+//
+// ⚠️ 为什么地址是 /api/comments 而不是 /api/posts/p001/comments：
+//   CloudBase HTTP 网关不支持 {id} 路径参数，只认固定路径（实测 2026-10-07）。
+//   所以帖子编号放请求体的 post_id 字段里，不放URL 上。
+//
+// 校验顺序照handleFavorite 那套：先读体 → 解析 → 校验 → 确认帖子存在 → 写。
+// 昵称允许留空（前端默认给「匿名」），但内容和帖子编号必填。
+async function handleCreateComment(req, res) {
+  const raw = await readBody(req);
+  let body;
+  try {
+    body = raw ? JSON.parse(raw) : {};
+  } catch (e) {
+    return json(res, 400, { ok: false, error: '请求体不是合法的 JSON' });
+  }
+  if (typeof body !== 'object' || Array.isArray(body) || !body) {
+    return json(res, 400, { ok: false, error: '请求体格式不对' });
+  }
+
+  // 帖子编号必填（因为不能放在 URL 上，只能靠请求体带）
+  const postId = typeof body.post_id === 'string' ? body.post_id.trim() : '';
+  if (!postId) {
+    logLine('comment.reject', `原因=缺 post_id`);
+    return json(res, 400, { ok: false, error: 'post_id 必填（要评论的帖子编号）' });
+  }
+
+  // 评论内容必填
+  const text = typeof body.body === 'string' ? body.body.trim() : '';
+  if (!text) {
+    logLine('comment.reject', `post_id=${postId} 原因=内容为空`);
+    return json(res, 400, { ok: false, error: '评论内容不能为空' });
+  }
+  // 昵称留空按「匿名」存，跟详情页昵称框的占位提示一致
+  const author = (typeof body.author === 'string' && body.author.trim()) || '匿名';
+
+  // 确认帖子存在且已过审（不给待审核的帖子收评论，跟详情页不给看保持同一个口径）
+  const post = await db.findPostForDetail(postId);
+  if (!post) {
+    logLine('comment.reject', `post_id=${postId} 原因=帖子不存在或未过审`);
+    return json(res, 404, { ok: false, error: '帖子不存在或还在审核中' });
+  }
+
+  const id = newCommentId();
+  try {
+    const saved = await db.insertComment({
+      id,
+      post_id: postId,
+      author,
+      body: text,
+      created_at: new Date().toISOString(),
+    });
+    logLine('comment.ok', `id=${saved.id} post_id=${postId}`);
+    return json(res, 201, {
+      ok: true,
+      comment: {
+        id: saved.id,
+        postId: saved.post_id,
+        author: saved.author,
+        body: saved.body,
+        createdAt: saved.created_at,
+      },
+    });
+  } catch (e) {
+    logLine('comment.error', `post_id=${postId} 错误=${e.message}`);
+    throw e; // 交给最外层catch翻成 502/503
+  }
+}
+
 // GET /api/hot —— 今日热搜
 async function handleHot(req, res, query) {
   let date = query.get('date') || beijingToday();
@@ -357,6 +498,20 @@ const server = http.createServer(async (req, res) => {
 
   try {
     if (req.method === 'GET' && path === '/posts') return await handlePosts(req, res);
+    // 单篇详情：GET /api/post?id=p001（Day 21）
+    // ⚠️ 为什么用 query 不用 /api/posts/p001：
+    //   CloudBase HTTP 网关**不支持 {id} 这种路径参数**，只认固定路径；
+    //   而 /api/posts 已经被 Day 20 的列表接口占了，不能改成 /api/posts/{id}。
+    //   所以另起一个固定路径 /api/post，帖子编号放query（?id=p001）。
+    //   这个位置 Day 17 就验证过能用——/api/hot?date=2026-10-05 一直正常工作。
+    if (req.method === 'GET' && path === '/post') {
+      const id = u.searchParams.get('id') || '';
+      if (!id) return json(res, 400, { ok: false, error: '缺少 id 参数（用法：/api/post?id=p001）' });
+      return await handlePostDetail(req, res, id);
+    }
+    // 发评论：POST /api/comments（Day 21）
+    // 同样因为网关不支持路径参数，帖子编号放请求体里的 post_id，不用放在 URL 上。
+    if (req.method === 'POST' && path === '/comments') return await handleCreateComment(req, res);
     if (req.method === 'GET' && path === '/hot') return await handleHot(req, res, u.searchParams);
     if (req.method === 'GET' && path === '/favorites') return await handleFavorites(req, res);
     if (req.method === 'POST' && path === '/favorites') return await handleFavorite(req, res);
