@@ -192,6 +192,19 @@
     // 它会同步执行各视图的 onShow，必须等所有 let/const 声明都跑完再启动，
     // 否则提前碰到现在还没声明的变量会抛「暂时性死区」错误。
 
+    // ================== Day 20：接口地址集中管理 ==================
+    // 为什么要有这个常量（Day 20 学到的东西）：
+    //   页面跑在静态托管域名（...webapps.tcloudbase.com），接口跑在 HTTP 网关域名
+    //   （...ap-shanghai.app.tcloudbase.com）。两个域名不同 → 浏览器认为是「别人的网站」
+    //   → 就算接口返回了数据，浏览器也会按同源策略拦下来（这就是跨域）。
+    //   所以前端不能写fetch('/api/posts') 这种相对路径——那会把请求发到静态托管自己的域名上，
+    //   而静态托管里根本没有/api/ 这个东西，必然 404，然后页面悄悄回退去读 posts.json 假数据。
+    //   必须写完整公网地址，请求才发得对地方。
+    //
+    // ⚠️ 换静态托管项目后这个地址可能跟着变（Day 15 踩过：每部署一次地址就换一个）。
+    //   看到首页数据不对时，第一件事就是回来核对这个常量。
+    const API_BASE = 'https://falsity001-d1gowkogp40251a26-1499370664.ap-shanghai.app.tcloudbase.com/api';
+
     // ================== 视图一：首页（Day 8 三栏 + 四种状态）==================
     // 帖子分类（Day 8 定，参考主流职场讨论话题归纳为 6 类）
     const CATEGORIES = ['求职面试', '职场新人', '人际沟通', '薪资福利', '晋升发展', '劳动权益'];
@@ -199,13 +212,16 @@
     let allPosts = [];      // 成功加载后存在这里，切换分类不用重新请求
     let currentCat = 'all'; // 当前选中的分类，'all' 表示全部
 
-    // Day 15：mock 版数据源——先试真接口 /api/posts（本地 server.js / 以后的真 API），
-    // 拿不到（静态托管没有后端）就回退读同目录的 posts.json。
+    // Day 15 定的 mock 版数据源：先试真接口 /api/posts（现在指向公网网关），
+    // 拿不到就回退读同目录的 posts.json。
     // 回退时对齐 server.js 的行为：只取已过审的、按发布时间倒序。
+    //⚠️ Day 20 补充：这个回退在公网上容易被误判成「接口挂了」——
+    //   因为它不报错，静悄悄换成假数据，页面照常渲染得出帖子。
+    //   所以判断有没有接上真数据，要看控制台里的请求地址和返回内容，不能只看页面有没有帖子。
     let mockPostsCache = null;
     async function fetchPosts() {
       try {
-        const r = await fetch('/api/posts');
+        const r = await fetch(API_BASE + '/posts');
         if (r.ok) return await r.json();
       } catch (e) { /* 网络错误也落到下面的 posts.json 回退 */ }
       if (!mockPostsCache) {
@@ -278,7 +294,8 @@
       { key: 'bilibili', label: 'B站' },
       { key: 'douyin',   label: '抖音' },
     ];
-    const TRENDS_API = 'https://falsity001-d1gowkogp40251a26-1499370664.ap-shanghai.app.tcloudbase.com/api/hot';
+    // Day 20 起跟着 API_BASE 走，不再单独硬编码整条地址
+    const TRENDS_API = API_BASE + '/hot';
 
     let trendsData = [];              // /api/hot 返回的原始行
     let trendsPlatform = 'weibo';     // 当前选中的平台标签
@@ -395,7 +412,7 @@
             ${p.authorVerified ? '<span class="badge verified">✓ 已认证</span>' : '<span class="badge anonymous">未认证</span>'}
             <span class="badge cat">${escapeHtml(p.category || '未分类')}</span>
             <span class="muted">${escapeHtml(p.author)} · ${formatDate(p.createdAt)}</span>
-            <span class="muted"> · ${p.comments.length} 条评论</span>
+            <span class="muted"> · ${(p.comments || []).length} 条评论</span>
           </div>
         `;
         root.appendChild(card);
@@ -592,7 +609,7 @@
             <button id="reportBtn" class="report-btn" type="button">举报</button>
           </div>
         `;
-        renderComments(p.comments);
+        renderComments(p.comments || []);
       } catch (e) {
         root.innerHTML = '<p class="notice error">加载失败：' + escapeHtml(String(e)) + '</p>';
       }

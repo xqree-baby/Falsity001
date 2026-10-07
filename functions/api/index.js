@@ -1,5 +1,6 @@
-// Day 17 建（Day 18 追加写入接口）
-// 用途：一个函数按路径分发四个接口——
+// Day 17 建（Day 18 追加写入接口，Day 20 追加帖子列表）
+// 用途：一个函数按路径分发五个接口——
+//   GET  /api/posts       已过审帖子列表（Day 20 新增，首页帖子区接真实数据库）
 //   GET  /api/hot        今日热搜（读 trends 表）
 //   GET  /api/favorites  收藏列表（favorites 联 posts，只返回已过审帖子）
 //   POST /api/favorites  收藏一篇帖子（Day 18 新增，第一个写入接口）
@@ -27,11 +28,24 @@ function beijingToday() {
   return new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10);
 }
 
-// 统一 JSON 出口：带 CORS 头（页面在 webapps 域名，接口在 gateway 域名，跨域）
+// 统一 JSON 出口（Day 20 改动：这里不再自己加 Access-Control-Allow-Origin）
+//⚠️ 为什么去掉（今天踩到的真跨域坑，不是「没配跨域」，是「配了两遍」）：
+//   部署到 HTTP 网关后实测（带浏览器 Origin 头请求）返回的是
+//     access-control-allow-origin: https://xxx.webapps.tcloudbase.com,*
+//   —— 网关已经先加了一个「请求方的域名」，我们又加了一个「*」，
+//   网关把两个值用逗号拼在一起。浏览器的规则是「这个头只能有一个值」，
+//   见到两个就认为跨域配置非法，于是**在网络层就掐掉整个响应**，
+//   JS 侧只能拿到 Failed to fetch，连状态码都读不到。
+//   判据：Console 里会出现
+//     The 'Access-Control-Allow-Origin' header contains multiple values ...
+//     but only one is allowed.
+//   为什么服务器侧脚本测不出来：不用浏览器发请求就没有 Origin 头，
+//   网关不加自己的那一份，响应里只剩我们的 *，看起来一切正常。
+//   → 所以验跨域必须用真浏览器（或至少手动带 Origin 头），不能只用 node fetch。
+//现在改成不碰这个头，让网关那份原样透传给浏览器。
 function json(res, status, obj) {
   res.writeHead(status, {
     'Content-Type': 'application/json; charset=utf-8',
-    'Access-Control-Allow-Origin': '*',
   });
   res.end(JSON.stringify(obj));
 }
@@ -185,7 +199,46 @@ async function handleFavorite(req, res) {
   }
 }
 
-// ---------------- 三个接口的实现 ----------------
+// ---------------- 四个接口的实现 ----------------
+
+// GET /api/posts —— 已过审的帖子列表（Day 20 新增：首页帖子区接真实数据库）
+async function handlePosts(req, res) {
+  const rows = await db.listApprovedPosts();
+  // 卡片上要显示「N 条评论」，而评论数不在 posts 表里，要单独查一次 comments 表。
+  // ⚠️ 查不到评论数也要正常返回帖子（counts 为空对象时用 0 兜底）——
+  //   列表接口不该因为评论统计失败就整个挂掉，那是锦上添花的信息。
+  let counts = {};
+  try {
+    counts = await db.countCommentsByPost(rows.map((r) => r.id));
+  } catch (e) {
+    console.log(`[posts] 评论数查询失败，暂按 0 显示：${e.message}`);
+  }
+  // 字段名从蛇形改成驼峰，和 api-contract.md 第2 节约定的形状对齐——
+  // 前端拿到的对象形状因此和读 posts.json 时完全一样，渲染代码不用两套。
+  // 返回 pending: false 是因为查询已经过滤过了，但字段留着，
+  // 这样前端 renderCards 之类的判断逻辑不用改。
+  // comments 只给条数不给正文：列表页不需要正文，正文是详情页的事。
+  return json(res, 200, {
+    ok: true,
+    count: rows.length,
+    posts: rows.map((r) => ({
+      id: r.id,
+      type: r.type,
+      category: r.category,
+      title: r.title,
+      body: r.body,
+      author: r.author,
+      authorVerified: r.author_verified,
+      pending: r.pending,
+      views: r.views,
+      createdAt: r.created_at,
+      // ⚠️ Day 20：这一条别删。页面上「N 条评论」读的就是它，
+      //   漏了会让前端在 p.comments.length 处报
+      //   「Cannot read properties of undefined」——因为 undefined.length 会抛。
+      comments: new Array(counts[r.id] || 0),
+    })),
+  });
+}
 
 // GET /api/hot —— 今日热搜
 async function handleHot(req, res, query) {
@@ -286,10 +339,12 @@ async function handleSync(req, res) {
 // ---------------- HTTP 服务器（Web 函数入口） ----------------
 
 const server = http.createServer(async (req, res) => {
-  // CORS 预检：浏览器跨域调用前会先发 OPTIONS 探路
+  // CORS 预检：浏览器跨域调用前会先发 OPTIONS 探路。
+  // ⚠️ Day 20：这里原来也加了 Access-Control-Allow-Origin，已去掉——
+  //   网关会自己加一份，函数再加就是「同一个头两个值」，浏览器直接拒绝整个响应。
+  //   方法/请求头的允许项保留，它们不会和网关重复。
   if (req.method === 'OPTIONS') {
     res.writeHead(204, {
-      'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type',
     });
@@ -301,6 +356,7 @@ const server = http.createServer(async (req, res) => {
   if (path.startsWith('/api/')) path = path.slice(4); // /api/hot -> /hot（网关前缀兼容）
 
   try {
+    if (req.method === 'GET' && path === '/posts') return await handlePosts(req, res);
     if (req.method === 'GET' && path === '/hot') return await handleHot(req, res, u.searchParams);
     if (req.method === 'GET' && path === '/favorites') return await handleFavorites(req, res);
     if (req.method === 'POST' && path === '/favorites') return await handleFavorite(req, res);

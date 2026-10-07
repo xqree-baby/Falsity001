@@ -39,7 +39,45 @@ async function dbGet(pathAndQuery) {
   return res.json();
 }
 
-// ---------------- 下面五个是对外的函数（业务层只用这些） ----------------
+// ---------------- 下面六个是对外的函数（业务层只用这些） ----------------
+
+// 查「已过审」的帖子列表，按发布时间倒序（Day 20 新增：给首页帖子区用）。
+// 为什么要单独一条查询而不是复用 listFavoritesWithPosts：
+//   帖子列表和收藏列表是两种不同的业务问题——前者问「全站有哪些帖子」，
+//   后者问「谁收藏了什么」。硬凑成一个函数会让调用方为了拿帖子也得先造一条收藏记录。
+// pending=eq.false：只看已过审的，与本地 server.js 和前端 posts.json 回退的行为保持一致。
+// ⚠️ 注意排序键：PostgreSQL 的 created_at 是 TIMESTAMPTZ，带时区。
+//   直接 order=created_at.desc 由数据库按绝对时间排，跨时区也可靠，
+//   不要在代码里拿到字符串再按字典序排（那样会在时区偏移时错位）。
+async function listApprovedPosts() {
+  return dbGet(
+    `posts?select=id,type,category,title,body,author,author_verified,pending,views,created_at` +
+      `&pending=eq.false&order=created_at.desc&limit=100`
+  );
+}
+
+// 查某几篇帖子各自有多少条评论（Day 20 追加）。
+// 为什么单独查而不是让帖子查询顺带带出来：PostgREST 的嵌套查询要在 select 里写
+//   comments(count)，但 count 是聚合结果、类型和普通行不一样，容易踩坑；
+//   更重要的是卡片上要显示的其实是「评论条数」这一个数字，不是评论内容，
+//   单独查一张小表（id, post_id, count）比拼内容再前端数一遍省得多，
+//   也避免「帖子列表接口把评论正文全带出来」——那是详情页才需要的量。
+// 入参：帖子编号数组；返回：{ p001: 3, p002: 0, ... }（没有评论的帖子也会给 0）
+async function countCommentsByPost(postIds) {
+  if (postIds.length === 0) return {};
+  const rows = await dbGet(
+    `comments?select=post_id&post_id=in.(${postIds.join(',')})&limit=1000`
+  );
+  // PostgREST 在只有 select 一个字段时可能直接返回数组，也可能返回 [{post_id:...}]；
+  // 两种都兜住，并且只数每个 post_id 出现了几次。
+  const counts = {};
+  for (const id of postIds) counts[id] = 0; // 先给全部帖子补0，避免「没评论」在页面上变成 undefined
+  for (const r of rows) {
+    const pid = r.post_id;
+    if (pid in counts) counts[pid] += 1;
+  }
+  return counts;
+}
 
 // 找一篇帖子。用来回答「这个 post_id 对应的帖子存在吗、是什么状态」——
 // 收藏前要确认帖子真实存在，而不是只靠外键报错（外键报错不好读，给前端一句人话更有用）。
@@ -125,10 +163,12 @@ async function upsertTrends(rows) {
   }
 }
 
-// 只导出业务层需要的五个函数。
+// 只导出业务层需要的六个函数。
 // dbGet / requireKey / DB_BASE 这些一律不导出——业务层不该有绕过去路的办法，
-// 想查什么就从这五个里挑，或者以后真需要新的查法时在这里加一个函数。
+// 想查什么就从这六个里挑，或者以后真需要新的查法时在这里加一个函数。
 module.exports = {
+  listApprovedPosts,
+  countCommentsByPost,
   findPostById,
   findTrendsByDate,
   listFavoritesWithPosts,
