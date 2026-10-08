@@ -6,6 +6,8 @@
 //   GET  /api/favorites  收藏列表（favorites 联 posts，只返回已过审帖子）
 //   POST /api/favorites  收藏一篇帖子（Day 18 新增，第一个写入接口）
 //   POST /api/comments   发一条评论（Day 21 新增，post_id 放请求体）
+//   PATCH /api/post      改一条帖子（Day 22 新增，白名单字段 + 改前查存在）
+//   DELETE /api/comments 删一条评论（Day 22 新增，删前查存在 + 回显删掉的是哪条）
 //   POST /api/sync       抓微博/B站/抖音真实热搜写回 trends（手动触发，判重不重复插行）
 //
 // ⚠️ 为什么详情和评论不用 /api/posts/:id 这种形态（2026-10-07 实测）：
@@ -381,6 +383,216 @@ async function handleCreateComment(req, res) {
   }
 }
 
+// ---------------- 修改与删除（Day 22） ----------------
+
+// 今天要回答的问题：删除为什么比新增更容易出事？确认加在哪？
+//
+//   新增出错 → 最坏是多了一条脏数据。它还在那儿、看得见、能筛出来、能删掉。
+//   删除出错 → 是「本来存在的东西没了」。当场没人报警（页面照样打开，
+//             只是少了一条），等发现时已经不可逆，备份也未必有。
+//
+//   所以删除/修改这类操作，确认要比新增多几道。今天这四道是：
+//     ① 对象必须存在（不存在给 404，不做「静默成功」——静默成功会让人以为删掉了）
+//     ② 关键参数必填且合法（少传就拒，不猜）
+//     ③ 限定能改的字段（PATCH 不能让人改 id / created_at）
+//     ④ 写一条日志（谁、对哪条、成功还是被拒，事后查得回来）
+
+// PATCH 字段白名单：只有这几个键允许被改，其余一律忽略。
+// 为什么必须要有白名单，不能「传什么改什么」：
+//   请求体是可以随便伪造的。如果不限制，调用方传 {id:'p999'} 就把这条记录的编号改了，
+//   传 {created_at:'1900-01-01'} 就能把发布时间改掉——
+//   这些字段是系统自己维护的，不属于「用户能编辑的内容」。
+// 只放行内容字段 + 一个计数字段（views 是浏览量，加减正常，改它不算破坏数据完整性）。
+const PATCHABLE_POST_FIELDS = ['title', 'category', 'views'];
+
+// 各字段的额外校验：类型不对的、越界的，在这里挡掉，给一句人话。
+// 为什么不在数据库层挡：数据库只会报 CHECK  Violation 或类型错误，
+//   那种报错给前端/user 看没有意义（「invalid input syntax for type integer」
+//   没人知道该改什么）。挡住的地方要能说清「你要改的这东西不对」。
+function validatePatchField(field, value) {
+  if (field === 'title') {
+    if (typeof value !== 'string' || !value.trim()) return 'title 必须是 non-empty 字符串';
+    if (value.trim().length > 200) return 'title 太长了（最多 200 字）';
+    return null;
+  }
+  if (field === 'category') {
+    // 分类是固定 6 类（前端 index.html 里的 CATEGORIES 常量）。
+    // 这里只做「是不是字符串、是不是空」的检查，不硬编码 6 个值——
+    //   分类清单是产品约定，可能变；硬编码到后端，以后前端加一类就得改后端发一次版。
+    if (typeof value !== 'string' || !value.trim()) return 'category 必须是字符串';
+    if (value.trim().length > 32) return 'category 太长了（最多 32 字）';
+    return null;
+  }
+  if (field === 'views') {
+    // 浏览量必须是非负整数。传字符串 / 负数 / 小数都不行——
+    //   让脏数据进库，以后做排序或统计就会得出奇怪的结论，而且没人知道是哪条坏的。
+    if (!Number.isInteger(value) || value < 0) return 'views 必须是非负整数';
+    if (value > 100000000) return 'views 太大了（上限 1 亿）';
+    return null;
+  }
+  return null;
+}
+
+// PATCH /api/post?id=p001 —— 改一条帖子
+//
+// 为什么地址是 /api/post?id=xx 而不是 /api/posts/p001：
+//   和 Day 21 的详情接口同一个理由——CloudBase HTTP 网关不支持 {id} 路径参数，
+//   只认固定路径；而 /api/posts 已经被列表接口占了。所以复用 /api/post，编号放 query。
+//   （这也说明「沿用已验证的形状」比「新造一个更顺手的形状」重要，
+//     因为新形状还得重新验证一遍网关吃不吃。）
+async function handleUpdatePost(req, res, postId) {
+  // 确认 ②：id 必填。路径层已经挡了空字符串，这里再挡一次非正常形态。
+  if (!/^p\d{3,}$/.test(postId)) {
+    return json(res, 400, { ok: false, error: 'id 格式不对（应为 p001 这样的帖子编号）' });
+  }
+
+  const raw = await readBody(req);
+  let body;
+  try {
+    body = raw ? JSON.parse(raw) : {};
+  } catch (e) {
+    return json(res, 400, { ok: false, error: '请求体不是合法的 JSON' });
+  }
+  if (typeof body !== 'object' || Array.isArray(body) || !body) {
+    return json(res, 400, { ok: false, error: '请求体格式不对' });
+  }
+
+  // 只挑白名单里的字段。⚠️ 注意这里是「挑出来」而不是「挑不出来就报错」——
+  //   传了 title、category、created_at，我们只改前两个，把 created_at 悄悄忽略。
+  //   这样调用方即使多带了字段也不会整个失败，同时系统字段依然改不了。
+  const patch = {};
+  const ignored = [];
+  for (const field of PATCHABLE_POST_FIELDS) {
+    if (Object.prototype.hasOwnProperty.call(body, field)) {
+      const err = validatePatchField(field, body[field]);
+      if (err) {
+        logLine('post.update.reject', `id=${postId} 字段=${field} 原因=${err}`);
+        return json(res, 400, { ok: false, error: err });
+      }
+      patch[field] = typeof body[field] === 'string' ? body[field].trim() : body[field];
+    }
+  }
+  for (const key of Object.keys(body)) {
+    if (!PATCHABLE_POST_FIELDS.includes(key)) ignored.push(key);
+  }
+
+  // 一个可改字段都没给：这是「什么也没说」，不是「删空」。
+  //   特别要挡掉空请求体 —— 不挡的话会发一次 PATCH 带空对象，
+  //   数据库可能什么都不改也可能报错，两种结果都让人不知道到底改没改。
+  if (Object.keys(patch).length === 0) {
+    logLine('post.update.reject', `id=${postId} 原因=没给任何可改字段`);
+    return json(res, 400, {
+      ok: false,
+      error: `没有可改的字段（可改：${PATCHABLE_POST_FIELDS.join(' / ')}）`,
+    });
+  }
+
+  // 确认 ①：改之前先查一次。
+  //   为什么要查两遍（查一次还不够）：这一遍查的是「改之前长什么样」——
+  //   既是 404 的判据，也是返回给页面的 before 值，
+  //   让调用方看到「原来是什么 → 现在是什么」，而不是自己记着旧值去对比。
+  const before = await db.findPostForDetail(postId);
+  if (!before) {
+    logLine('post.update.reject', `id=${postId} 原因=帖子不存在或未过审`);
+    return json(res, 404, { ok: false, error: '帖子不存在或还在审核中' });
+  }
+
+  // 发给数据库的 patch 也要把 post_id 带上（要改 category 时得重新过一遍非空校验）
+  const saved = await db.updatePost(postId, patch);
+  if (!saved) {
+    // 走到这里说明「查的时候存在、更新的时候不见了」——
+    //   中间有别人删了它，或者 pending 状态变了。属于并发，不能当成功。
+    logLine('post.update.reject', `id=${postId} 原因=更新命中 0 行`);
+    return json(res, 404, { ok: false, error: '帖子不存在，或在查询到更新之间被删掉了' });
+  }
+
+  // 确认 ④：日志。改了什么字段也记一笔，事后能查。
+  logLine('post.update.ok', `id=${postId} 字段=${Object.keys(patch).join(',')}` +
+    (ignored.length ? ` 已忽略=${ignored.join(',')}` : ''));
+
+  // ⚠️ 返回的 after 值全部来自数据库（saved），不是把请求体原样退回去。
+  //   before 来自更新前的查询，两个值都不是我们自己编的 → 截图里的对比是可信的。
+  return json(res, 200, {
+    ok: true,
+    id: postId,
+    // 只回显实际动过的这几个字段的前后对比，不是整条帖子。
+    //   理由：调用方要的是「我改的那一栏变没变」，塞一整条帖子会让人在页面里找哪行变了。
+    changed: Object.keys(patch).map((k) => ({
+      field: k,
+      before: k === 'views' ? before.views : before[k],
+      after: k === 'views' ? saved.views : saved[k],
+    })),
+    post: {
+      id: saved.id,
+      type: saved.type,
+      category: saved.category,
+      title: saved.title,
+      author: saved.author,
+      authorVerified: saved.author_verified,
+      views: saved.views,
+      createdAt: saved.created_at,
+    },
+    // 明确告诉调用方「你传的这些字段我无视了」，而不是悄悄吞掉。
+    //   无声忽略是接口最大的坑之一：调用方会以为 pending 也改了。
+    ...(ignored.length ? { ignoredFields: ignored } : {}),
+  });
+}
+
+// DELETE /api/comments?id=c001 —— 删一条评论
+//
+// 为什么删的是评论、不是帖子（这个判断本身就是今天要学的东西）：
+//   posts 表被两张表用外键指着——comments.post_id 和 favorites.post_id 都 REFERENCES posts(id)。
+//   也就是说「删帖子」这个动作数据库会直接挡下来（外键约束），而且一旦有评论或收藏，
+//   光报错不够用，你还得决定是「连评论一起删」还是「先转移归属」——这是产品决策不是技术决策。
+//   评论是叶子节点：没有任何表指向 comments，删它不会牵连任何东西。
+//   → 今天用最安全的对象演示「不可逆」，真要做删除产品时再面对级联删除那摊事。
+//
+// 为什么用 /api/comments?id=xx 而不是 /api/comments/xx：网关不支持路径参数（同上），编号放 query。
+async function handleDeleteComment(req, res, commentId) {
+  // 确认 ②：id 必填。c001 是种子数据、c 开头的 base36 是 Day 21 之后新发的，两种都收。
+  if (!commentId || commentId.length > 16) {
+    return json(res, 400, { ok: false, error: '缺少 id 参数（用法：/api/comments?id=c001）' });
+  }
+
+  // 确认 ①：删之前先查一次。
+  //   ⚠️ 这一步是 DELETE 最重要的一步，不能省：
+  //   「删一条不存在的东西」有两种处理方式——
+  //     a) 返回成功（幂等）：调用方重复点两次删除不会报错，适合「确保它不存在」的场景；
+  //     b) 返回 404：调用方能知道「我以为在删的东西本来就不在这里」，可能自己搞错了 id。
+  //   这里选 b)：404。因为调用方是人点的按钮，不是一段要幂等跑的脚本，
+  //   「我删的那条评论找不到」对用户是有意义的信息，值得看见。
+  const before = await db.findCommentById(commentId);
+  if (!before) {
+    logLine('comment.delete.reject', `id=${commentId} 原因=评论不存在`);
+    return json(res, 404, { ok: false, error: `评论 ${commentId} 不存在，没有删掉任何东西` });
+  }
+
+  // ⚠️ 删之前把「删掉的是哪条」记下来。
+  //   因为一旦 DELETE 成功就再也拿不回正文了，不留这一笔的话，
+  //   用户投诉「我那条评论怎么没了」，日志里只有一个光秃秃的 id，谁也认不出是哪条。
+  const saved = await db.deleteComment(commentId);
+  if (!saved) {
+    logLine('comment.delete.reject', `id=${commentId} 原因=删除命中 0 行`);
+    return json(res, 404, { ok: false, error: `评论 ${commentId} 在查询到删除之间被别人删掉了` });
+  }
+
+  // 确认 ④：日志（含正文快照，删了就查不回来了）
+  logLine('comment.delete.ok', `id=${commentId} post_id=${saved.post_id} 正文快照="${String(saved.body).slice(0, 40)}"`);
+
+  // 回显删掉的是哪一条：id / 属于哪篇帖子 / 昵称 / 正文。
+  //   理由：不可逆的操作要留一张「回执」，让调用方能对得上自己刚才删的是哪条。
+  return json(res, 200, {
+    ok: true,
+    deleted: {
+      id: saved.id,
+      postId: saved.post_id,
+      author: saved.author,
+      body: saved.body,
+      createdAt: saved.created_at,
+    },
+  });
+}
+
 // GET /api/hot —— 今日热搜
 async function handleHot(req, res, query) {
   let date = query.get('date') || beijingToday();
@@ -484,9 +696,18 @@ const server = http.createServer(async (req, res) => {
   // ⚠️ Day 20：这里原来也加了 Access-Control-Allow-Origin，已去掉——
   //   网关会自己加一份，函数再加就是「同一个头两个值」，浏览器直接拒绝整个响应。
   //   方法/请求头的允许项保留，它们不会和网关重复。
+  // ⚠️ Day 22 追加 PATCH / DELETE 到 Allow-Methods（这个漏了会「静默失败」，很难查）：
+  //   浏览器把 PATCH / DELETE / PUT 算「非简单请求」，发出去之前一定先来问一句 OPTIONS：
+  //     「这些方法我允许吗？」
+  //   如果这里只写了 GET,POST,OPTIONS，浏览器读完直接判定「这个方法不允许」，
+  //   **根本不会把真正的 PATCH 请求发出去**。
+  //   页面上的表现是 Network 里那条 PATCH 显示「失败 / 被取消」，
+  //   但开发者工具的 Console 一句红字都没有（这不是后端拒绝，是浏览器没发），
+  //   而且服务器日志里也什么都没有——因为请求压根没到。
+  //   → 排查口诀：改数据没反应、控制台无报错、服务器没日志 = 先怀疑预检白名单没放行这个方法。
   if (req.method === 'OPTIONS') {
     res.writeHead(204, {
-      'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
+      'Access-Control-Allow-Methods': 'GET,POST,PATCH,DELETE,OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type',
     });
     return res.end();
@@ -512,6 +733,24 @@ const server = http.createServer(async (req, res) => {
     // 发评论：POST /api/comments（Day 21）
     // 同样因为网关不支持路径参数，帖子编号放请求体里的 post_id，不用放在 URL 上。
     if (req.method === 'POST' && path === '/comments') return await handleCreateComment(req, res);
+    // 改帖子：PATCH /api/post?id=p001（Day 22）
+    // 复用详情接口那条路径（GET /api/post?id=xx），只是换个方法——同一个资源用不同方法表达不同动作，
+    //   这是 REST 的基本约定：GET 读、PATCH 改、DELETE 删，都指向同一个地址。
+    if (req.method === 'PATCH' && path === '/post') {
+      const id = u.searchParams.get('id') || '';
+      if (!id) return json(res, 400, { ok: false, error: '缺少 id 参数（用法：/api/post?id=p001）' });
+      return await handleUpdatePost(req, res, id);
+    }
+    // 删评论：DELETE /api/comments?id=c001（Day 22）
+    // 同一个 /comments 路径配不同方法：POST 是发评论，DELETE 是删评论。
+    // ⚠️ 这个「同一个地址换方法」的设计是今天刻意选的：
+    //   因为 CloudBase HTTP 网关按「路径」绑定路由，不区分方法，
+    //   所以同一个路径配多个方法**不用去控制台多绑一条**，省一次部署期操作。
+    if (req.method === 'DELETE' && path === '/comments') {
+      const id = u.searchParams.get('id') || '';
+      if (!id) return json(res, 400, { ok: false, error: '缺少 id 参数（用法：/api/comments?id=c001）' });
+      return await handleDeleteComment(req, res, id);
+    }
     if (req.method === 'GET' && path === '/hot') return await handleHot(req, res, u.searchParams);
     if (req.method === 'GET' && path === '/favorites') return await handleFavorites(req, res);
     if (req.method === 'POST' && path === '/favorites') return await handleFavorite(req, res);

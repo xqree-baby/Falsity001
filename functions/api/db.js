@@ -41,6 +41,12 @@ async function dbGet(pathAndQuery) {
 
 // ---------------- 下面六个是对外的函数（业务层只用这些） ----------------
 
+// ⚠️ 下面新增的三个写函数（updatePost / deleteComment）说明「Day 22 加的」：
+//   修改和删除跟新增不一样——新增只管「插进去」，错了顶多多一条脏数据；
+//   删除是「本来存在的东西没了」，当场看不出来、事后不可逆。
+//   所以这里只负责「把请求发给数据库、把数据库的真实返回带回去」，
+//   确认逻辑（存在吗？只让改哪些字段？）一律留在业务层，不塞进数据层。
+
 // 查「已过审」的帖子列表，按发布时间倒序（Day 20 新增：给首页帖子区用）。
 // 为什么要单独一条查询而不是复用 listFavoritesWithPosts：
 //   帖子列表和收藏列表是两种不同的业务问题——前者问「全站有哪些帖子」，
@@ -213,18 +219,96 @@ async function insertComment(row) {
   return rows[0];
 }
 
-// 只导出业务层需要的九个函数。
+// Day 22 新增：按编号找一条评论（DELETE 删之前要确认它存在、并且留下一份「删掉的是哪条」的快照）。
+// 为什么不能靠 deleteComment 的返回值来确认存在：那是删**之后**才拿到的东西，
+//   而「删之前先看一眼、拿定它长什么样」必须在删除动作之前发生——
+//   顺序反了就成了「先删后看」，看不到就没法在删之前拒绝。
+// 只取删除确认需要的那几个字段，不多带。
+async function findCommentById(commentId) {
+  const rows = await dbGet(
+    `comments?id=eq.${encodeURIComponent(commentId)}&select=id,post_id,author,body,created_at&limit=1`
+  );
+  return rows[0];
+}
+
+// ---------------- 修改与删除（Day 22 新增） ----------------
+
+// 改一条帖子（PATCH /posts?id=eq.XXX，请求体是要改的字段）。
+// 为什么用 PATCH 而不是 PUT：PUT 语义是「整条替换，没传的字段会被清空」，
+//   而我们要的是「只改我点名字的那几个字段」，PATCH 正是这个语义。
+// 为什么带 Prefer: return=representation：让数据库把**改完之后那一行**原样退回来。
+//   返回值必须是库里的真值，不能拿我们发过去的值回显——
+//   万一数据库有默认值、触发器或类型转换（views 传字符串回来是数字），
+//   自己回显就等于撒了一个谎，页面上看着改了，库里其实不是那个值。
+// 为什么不拼 URL 里的字段值：PostgREST 的值全部走 JSON 请求体（天然参数化），
+//   这里拼的只有主键，而主键是业务自己定的（p001 这种），不是用户输入的任意字符串。
+async function updatePost(postId, patch) {
+  requireKey();
+  const res = await fetch(
+    `${DB_BASE}/posts?id=eq.${encodeURIComponent(postId)}`,
+    {
+      method: 'PATCH',
+      headers: {
+        Authorization: `Bearer ${API_KEY}`,
+        'Content-Type': 'application/json',
+        Prefer: 'return=representation',
+      },
+      body: JSON.stringify(patch),
+    }
+  );
+  if (!res.ok) {
+    const e = new Error(`数据库 REST API 返回 ${res.status}：${(await res.text()).slice(0, 300)}`);
+    e.dbStatus = res.status;
+    throw e;
+  }
+  const rows = await res.json();
+  // 数组为空 = 命中的行数是 0 = 这一行 id 不存在。
+  // ⚠️ 为什么要单独判：数据库对「更新 0 行」不报错，返回 200 + 空数组，
+  //   不判的话上层会拿到 undefined 再去读 .id，直接抛 TypeError，
+  //   排查时看到的是「Cannot read properties of undefined」，完全指不到「id 不存在」这件事。
+  return rows[0];
+}
+
+// 删一条评论（DELETE /comments?id=eq.XXX）。
+// 同样带 return=representation：删之前先把这一行退回来，
+//   业务层要靠它确认「删掉的是哪一条」（回显给用户看，不让他盲删）。
+// 为什么不加 limit=1：主键等值过滤本来就只会命中 0 或 1 行，加了也不改变语义，只添乱。
+async function deleteComment(commentId) {
+  requireKey();
+  const res = await fetch(
+    `${DB_BASE}/comments?id=eq.${encodeURIComponent(commentId)}`,
+    {
+      method: 'DELETE',
+      headers: {
+        Authorization: `Bearer ${API_KEY}`,
+        Prefer: 'return=representation',
+      },
+    }
+  );
+  if (!res.ok) {
+    const e = new Error(`数据库 REST API 返回 ${res.status}：${(await res.text()).slice(0, 300)}`);
+    e.dbStatus = res.status;
+    throw e;
+  }
+  const rows = await res.json();
+  return rows[0]; // 空数组 = 这一行本来就不存在
+}
+
+// 只导出业务层需要的十个函数（Day 22 加了 updatePost / deleteComment）。
 // dbGet / requireKey / DB_BASE 这些一律不导出——业务层不该有绕过去路的办法，
-// 想查什么就从这八个里挑，或者以后真需要新的查法时在这里加一个函数。
+// 想查什么就从这十个里挑，或者以后真需要新的查法时在这里加一个函数。
 module.exports = {
   listApprovedPosts,
   countCommentsByPost,
   findPostById,
   findPostForDetail,
   findCommentsByPost,
+  findCommentById,
   findTrendsByDate,
   listFavoritesWithPosts,
   insertFavorite,
   insertComment,
+  updatePost,
+  deleteComment,
   upsertTrends,
 };
