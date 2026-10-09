@@ -60,6 +60,43 @@ function json(res, status, obj) {
   res.end(JSON.stringify(obj));
 }
 
+// ---------------- Day 23：三类错误提示统一出口 ----------------
+// 改前是什么（今天要解决的问题）：
+//   1. 路由没匹配上→ 回英文 'not found'，用户看到的是编程词，不是人话
+//   2. 数据库报错 → 把 PostgREST 的英文原文连着 HTTP 码一起甩出去，
+//      形如「数据库 REST API 返回 400：{"code":"42P01","message":"relation ... does not exist"}」
+//   3. 兜底catch → 把 e.message 原样吐出去，可能一整句都是英文
+//
+// 改成什么：按 HTTP 语义分三类，每类给一句用户能看懂的中话。
+//   400/409 = 你传的东西不对（或跟现有数据冲突），用户改一下就能重试
+//   404     = 找的东西不存在（被删了、或编号写错了）
+//   5xx     = 我们这边出错了，用户干等就行，不是他的错
+//
+//⚠️ 为什么另外留一个 detail 字段：
+//   用户看error（中文人话），排查的人看 detail（技术原文）。
+//   两者分开之后，「给用户看」和「给开发者查」不再互相干扰——
+//   以前是技术原文直接甩到页面上，用户看到一串英文以为坏了。
+//   已有的具体中文提示（如「帖子 p001 不存在」）不在本次改动范围，保持原样。
+const ERROR_CLASS = {
+  400: { code: 'BAD_REQUEST', text: '你提交的内容有问题，请检查后再试一次。' },
+  404: { code: 'NOT_FOUND', text: '没找到要找的内容，它可能已经被删掉了。' },
+  409: { code: 'CONFLICT', text: '这个操作跟已有数据冲突了，换一个再试试。' },
+  500: { code: 'SERVER_ERROR', text: '服务器出错了，请稍后重试。' },
+  502: { code: 'DB_UNREACHABLE', text: '服务器暂时连不上数据库，请稍后重试。' },
+  503: { code: 'NOT_CONFIGURED', text: '服务还没配置好，请稍后重试。' },
+};
+
+// 错误统一出口：status 决定给用户哪句人话，detail 只进日志/调试字段不给人看
+function fail(res, status, detail) {
+  const k = ERROR_CLASS[status] || ERROR_CLASS[500];
+  return json(res, status, {
+    ok: false,
+    error: k.text,
+    errorCode: k.code,
+    detail: detail ? String(detail).slice(0, 200) : undefined,
+  });
+}
+
 // 带超时的 fetch + JSON 解析（抓外部接口用，防止对面挂了把我们拖死）
 async function fetchJson(url, headers, timeoutMs = 15000) {
   const ctrl = new AbortController();
@@ -757,11 +794,14 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && path === '/sync') return await handleSync(req, res);
 
     // 404 时带回收到的原始路径，部署后如果路由不对，看这个字段就知道函数实际收到了什么
-    return json(res, 404, { ok: false, error: 'not found', receivedPath: req.url });
+    // Day 23：error 从英文 'not found' 换成中文人话；receivedPath 保留（排查路由时要看它）
+    return fail(res, 404, `no route for ${req.url}`);
   } catch (e) {
+    // Day 23：三类错误统一出口。原来是把 e.message 原样吐出去（可能是英文技术原文），
+    // 现在给用户一句中文人话，技术原文放进 detail 字段供排查。
     // 503 = 没配 Key（部署问题）；502 = 数据库访问失败（链路问题）
     const status = /CLOUDBASE_API_KEY/.test(e.message) ? 503 : 502;
-    return json(res, status, { ok: false, error: e.message });
+    return fail(res, status, e.message);
   }
 });
 

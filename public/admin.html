@@ -56,7 +56,8 @@
           btn.addEventListener('click', () => onAction(btn.dataset.id, btn.dataset.action));
         });
       } catch (e) {
-        root.innerHTML = '<p class="notice error">加载失败：' + escapeHtml(String(e)) + '</p>';
+        // Day 23：英文异常换成中文人话
+        root.innerHTML = '<p class="notice error">' + escapeHtml(friendlyText(e, '列表加载失败，请稍后重试')) + '</p>';
       }
     }
 
@@ -69,12 +70,12 @@
         });
         if (!r.ok) {
           const err = await r.json().catch(() => ({}));
-          alert('操作失败：' + (err.error || r.status));
+          alert('操作失败：' + (err.error || '服务器返回 ' + r.status + '，请稍后重试'));
           return;
         }
         await load();
       } catch (e) {
-        alert('操作失败：' + e.message);
+        alert('操作失败：' + friendlyText(e, '请稍后重试'));
       }
     }
 
@@ -82,6 +83,25 @@
       return String(s).replace(/[&<>"']/g, c => ({
         '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
       }[c]));
+    }
+
+    // Day 23：把裸报错翻成人话（与 index.html 同一份逻辑，四个页面各存一份是因为没有构建步骤）
+    // 改前：页面直接显示 'TypeError: Failed to fetch' 这类英文
+    function friendlyError(e, fallback) {
+      const raw = (e && (e.message || e.toString())) || String(e || '');
+      if (/Failed to fetch|NetworkError|Load failed/i.test(raw)) {
+        return { text: '连不上服务器，请检查网络后重试', detail: raw };
+      }
+      if (/timeout|abort/i.test(raw)) {
+        return { text: '服务器响应太慢了，请稍后重试', detail: raw };
+      }
+      if (/Unexpected token|is not valid JSON|JSON parse/i.test(raw)) {
+        return { text: '服务器返回的数据格式不对，请稍后重试', detail: raw };
+      }
+      return { text: fallback || '出了点问题，请稍后重试', detail: raw };
+    }
+    function friendlyText(e, fallback) {
+      return friendlyError(e, fallback).text;
     }
     function formatDate(iso) {
       try {

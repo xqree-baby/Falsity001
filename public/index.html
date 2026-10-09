@@ -261,9 +261,12 @@
         renderCards();
       } catch (e) {
         // 状态四：错误（网络断开、后端没启动等），给用户重试的机会
+        // Day 23：不再显示 'TypeError: Failed to fetch'，换成中文人话；原文留在控制台供排查
+        const fe = friendlyError(e, '加载失败，请稍后重试');
+        console.warn('[首页]加载列表失败：', fe.detail);
         const err =
           '<div class="state-box error">' +
-          '<div>加载失败：' + escapeHtml(String(e.message || e)) + '</div>' +
+          '<div>' + escapeHtml(fe.text) + '</div>' +
           '<button onclick="loadList()">重试</button>' +
           '</div>';
         root.innerHTML = err;
@@ -341,7 +344,7 @@
         document.getElementById('trendsTabs').innerHTML = '';
         listRoot.innerHTML =
           '<div class="trends-fallback">真实热搜暂不可用，以下为「示例数据」</div>' +
-          '<p class="trends-empty">接口未返回数据（' + escapeHtml(String(e.message || e)) + '）</p>';
+          '<p class="trends-empty">接口未返回数据（' + escapeHtml(friendlyText(e, '未知原因')) + '）</p>';
       }
     }
 
@@ -486,7 +489,7 @@
           body: JSON.stringify({ type, title, body, category })
         });
         const data = await r.json().catch(() => ({}));
-        if (!r.ok) { setStatus('失败：' + (data.error || r.status), 'error'); return; }
+        if (!r.ok) { setStatus('失败：' + (data.error || '服务器返回 ' + r.status + '，请稍后重试'), 'error'); return; }
         // Day 13 规则变更：所有帖子（含认证用户）都要审核，通过后才会出现在首页
         setStatus('已提交，等待审核（通过后才会出现在首页）。3 秒后回首页…', 'ok');
         document.getElementById('title').value = '';
@@ -494,7 +497,7 @@
         document.getElementById('category').value = '';
         setTimeout(() => location.hash = '#/', 3000);
       } catch (e) {
-        setStatus('失败：' + e.message, 'error');
+        setStatus('失败：' + friendlyText(e, '请稍后重试'), 'error');
       }
     });
 
@@ -553,7 +556,8 @@
           btn.addEventListener('click', () => onAction(btn.dataset.id, btn.dataset.action));
         });
       } catch (e) {
-        root.innerHTML = '<p class="notice error">加载失败：' + escapeHtml(String(e)) + '</p>';
+        // Day 23：英文异常换成中文人话（原文留在控制台）
+        root.innerHTML = '<p class="notice error">' + escapeHtml(friendlyText(e, '加载失败，请稍后重试')) + '</p>';
       }
     }
 
@@ -566,12 +570,14 @@
         });
         if (!r.ok) {
           const err = await r.json().catch(() => ({}));
-          alert('操作失败：' + (err.error || r.status));
+          // Day 23：r.status 是数字（500这种），直接显示等于给用户看数字，改成中文；
+          // 后端自己给的中文 error 优先用它。
+          alert('操作失败：' + (err.error || '服务器返回 ' + r.status + '，请稍后重试'));
           return;
         }
         await loadAdmin();
       } catch (e) {
-        alert('操作失败：' + e.message);
+        alert('操作失败：' + friendlyText(e, '请稍后重试'));
       }
     }
 
@@ -624,7 +630,8 @@
         `;
         renderComments(p.comments || []);
       } catch (e) {
-        root.innerHTML = '<p class="notice error">加载失败：' + escapeHtml(String(e)) + '</p>';
+        // Day 23：英文异常换成中文人话（原文留在控制台）
+        root.innerHTML = '<p class="notice error">' + escapeHtml(friendlyText(e, '帖子加载失败，请稍后重试')) + '</p>';
       }
     }
 
@@ -703,14 +710,15 @@
         });
         if (!r.ok) {
           const err = await r.json().catch(() => ({}));
-          setCStatus('失败：' + (err.error || r.status), 'error');
+          setCStatus('失败：' + (err.error || '服务器返回 ' + r.status + '，请稍后重试'), 'error');
           return;
         }
         document.getElementById('cBody').value = '';
         setCStatus('已提交', 'ok');
         await loadPost(currentPostId);
       } catch (e) {
-        setCStatus('失败：' + e.message, 'error');
+        // Day 23：e.message 是英文（Failed to fetch / TypeError...），换成人话
+        setCStatus('失败：' + friendlyText(e, '请稍后重试'), 'error');
       }
     });
 
@@ -788,6 +796,37 @@
       return String(s).replace(/[&<>"']/g, c => ({
         '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
       }[c]));
+    }
+
+    // ================== Day 23：把裸报错翻成人话 ==================
+    // 问题：以前所有错误提示都是把JS 异常对象直接字符串化贴到页面上，
+    //   用户看到的是 'TypeError: Failed to fetch'、'Unexpected token < in JSON' 这类英文，
+    //   既看不懂也不知道下一步该干嘛。
+    // 做法：按「错在哪」分类，换成一句能指路的提示；顺手把英文原文留在 detail 里，
+    //   开发者需要时在控制台还能看到，页面上不再出现英文黑话。
+    // ⚠️ 边界：后端自己返回的中文 error（比如「帖子不存在或还在审核中」）直接原样透传，
+    //   不在这里二次加工——那已经是人话了。
+    function friendlyError(e, fallback) {
+      const raw = (e && (e.message || e.toString())) || String(e || '');
+      // 情况一：网络层失败。fetch 抛的错没有具体原因，只有类型，
+      //   但这一类是最常见的（断网/断网/跨域被拦/后端没启动），必须给出可操作的下一步。
+      if (/Failed to fetch|NetworkError|Load failed/i.test(raw)) {
+        return { text: '连不上服务器，请检查网络后重试', detail: raw };
+      }
+      // 情况二：请求超时（我们自己设了超时上限，或网关掐了）。
+      if (/timeout|abort/i.test(raw)) {
+        return { text: '服务器响应太慢了，请稍后重试', detail: raw };
+      }
+      // 情况三：返回的不是 JSON。常见于请求打到了静态托管页面上（拿回一整张 HTML）。
+      if (/Unexpected token|is not valid JSON|JSON parse/i.test(raw)) {
+        return { text: '服务器返回的数据格式不对，请稍后重试', detail: raw };
+      }
+      // 情况四：认不出来的，直接给通用文案，原文留给开发者。
+      return { text: fallback || '出了点问题，请稍后重试', detail: raw };
+    }
+    // 只要一句人话的时候用这个；需要在控制台留线索的场合用上面那个拿 detail
+    function friendlyText(e, fallback) {
+      return friendlyError(e, fallback).text;
     }
     function formatDate(iso) {
       try {

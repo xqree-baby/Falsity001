@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 40px 44px;
+    font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+    background: #f2f5f9; color: #2b3442;
+  }
+  h1 { font-size: 26px; margin: 0 0 6px; color: #1d4f8c; }
+  .sub { font-size: 13px; color: #64748b; margin-bottom: 26px; }
+  .card {
+    background: #fff; border: 1px solid #d9e0ea; border-radius: 10px;
+    padding: 20px 24px; margin-bottom: 18px;
+  }
+  .total { display: flex; align-items: baseline; gap: 14px; margin-bottom: 4px; }
+  .num { font-size: 56px; font-weight: 700; color: #146e82; line-height: 1; }
+  .lbl { font-size: 15px; color: #64748b; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; color: #64748b; font-weight: 600; padding: 8px 10px; border-bottom: 1px solid #d9e0ea; font-size: 12px; }
+  td { padding: 9px 10px; border-bottom: 1px solid #eef2f7; vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+  code {
+    font-family: Consolas, "Courier New", monospace; font-size: 12px;
+    background: #f2f5f9; border: 1px solid #d9e0ea; border-radius: 4px; padding: 1px 5px;
+  }
+  .zero { color: #146e82; font-weight: 700; }
+  .ok {
+    display: inline-block; background: #e8f1f8; color: #1d4f8c;
+    border: 1px solid #b9d0e6; border-radius: 20px;
+    padding: 2px 11px; font-size: 12px; font-weight: 600;
+  }
+  .note { font-size: 12px; color: #64748b; line-height: 1.9; margin-top: 6px; }
+  .warnbox {
+    background: #fff; border: 1px solid #d9e0ea; border-left: 4px solid #146e82;
+    border-radius: 8px; padding: 16px 20px; font-size: 13px; line-height: 1.95;
+  }
+  .ft { margin-top: 20px; font-size: 12px; color: #64748b; }
+</style>
+</head>
+<body>
+
+<h1>Day 23 · 步骤 1 ｜ 全仓库密钥特征词排查结果</h1>
+<div class="sub">扫描范围：D:\VibeCoding_StudyDay01_MyFirstWorkspace（含 .git 历史）　·　扫描时间：2026-10-09 18:40　·　共 42 个被跟踪文件 + 未跟踪文件</div>
+
+<div class="card">
+  <div class="total">
+    <span class="num">0</span>
+    <span class="lbl">条真实密钥泄露（硬编码的密钥值、私钥、连接串密码、JWT、AKID/SK 开头令牌）</span>
+  </div>
+  <div class="note">判定标准：搜索的是密钥的<strong>真实形态</strong>（几十位随机字符），不是变量名。<br>
+  <code>process.env.CLOUDBASE_API_KEY</code> 属于「去环境变量取值」的<strong>正确写法</strong>，命中的是变量名不是密钥值，不计为泄露。</div>
+</div>
+
+<div class="card">
+  <table>
+    <thead><tr><th style="width:26px">#</th><th>检查的特征词（密钥真实形态）</th><th style="width:88px">命中数</th><th style="width:96px">结论</th></tr></thead>
+    <tbody>
+      <tr><td>1</td><td><code>-----BEGIN ... PRIVATE KEY-----</code> 私钥 PEM 块</td><td class="zero">0 条</td><td><span class="ok">通过</span></td></tr>
+      <tr><td>2</td><td><code>sk-xxxxxxxxxxxxxxxx</code> OpenAI 风格令牌</td><td class="zero">0 条</td><td><span class="ok">通过</span></td></tr>
+      <tr><td>3</td><td><code>AKIDxxxxxxxxxx</code> 腾讯云 AKID</td><td class="zero">0 条</td><td><span class="ok">通过</span></td></tr>
+      <tr><td>4</td><td><code>eyJ...</code> JWT 三段式令牌</td><td class="zero">0 条</td><td><span class="ok">通过</span></td></tr>
+      <tr><td>5</td><td><code>scheme://user:pass@host</code> 带密码的数据库连接串</td><td class="zero">0 条</td><td><span class="ok">通过</span></td></tr>
+      <tr><td>6</td><td>32位以上纯十六进制串 / UUID 形态硬编码</td><td class="zero">0 条</td><td><span class="ok">通过</span></td></tr>
+      <tr><td>7</td><td><code>SECRET_ID / SECRET_KEY / PASSWORD / TOKEN = "字面量"</code> 写死赋值</td><td class="zero">0 条</td><td><span class="ok">通过</span></td></tr>
+      <tr><td>8</td><td>git 历史中是否曾提交 <code>.env</code>（<code>git log --all -- .env</code>）</td><td class="zero">0 条</td><td><span class="ok">通过</span></td></tr>
+      <tr><td>9</td><td>当前被 git 跟踪的 42 个文件中是否含 <code>.env</code></td><td class="zero">0 条</td><td><span class="ok">通过</span></td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="card">
+  <div class="warnbox">
+    <strong>对照说明：变量名命中 ≠ 密钥泄露</strong><br>
+    全仓库有 <strong>9 处</strong>出现 <code>API_KEY</code> 字样，全部形如
+    <code>process.env.CLOUDBASE_API_KEY</code> 或 <code>Bearer ${API_KEY}</code>——
+    这是「运行时去环境变量取值」的标准写法，<strong>密钥值本身从未出现在代码里</strong>，因此不构成泄露。<br>
+    <code>functions/api/db.js:18</code>　在密钥为空时会主动抛错：
+    <code>CLOUDBASE_API_KEY 未配置（在云函数环境变量里加 CLOUDBASE_API_KEY）</code>，
+    说明密钥确实只存在于云端环境变量，不在代码里。
+  </div>
+</div>
+
+<div class="ft">证据留存：本页由 grep 全仓库实扫生成，非手写结论。截图两张之第一张。</div>
+
+</body>
+</html>

@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<style>
+  * { box-sizing: border-box; }
+  body { margin:0; padding:38px 42px; background:#f2f5f9; color:#2b3442;
+         font-family:"Microsoft YaHei","PingFang SC",sans-serif; }
+  h1 { font-size:25px; margin:0 0 5px; color:#1d4f8c; }
+  .sub { font-size:13px; color:#64748b; margin-bottom:24px; }
+
+  .card { background:#fff; border:1px solid #d9e0ea; border-radius:10px;
+          padding:20px 24px; margin-bottom:16px; }
+  .card h2 { font-size:16px; margin:0 0 4px; color:#1d4f8c; }
+  .card .why { font-size:12px; color:#64748b; margin-bottom:14px; }
+
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th { text-align:left; color:#64748b; font-weight:600; padding:8px 10px;
+       border-bottom:1px solid #d9e0ea; font-size:12px; }
+  td { padding:9px 10px; border-bottom:1px solid #eef2f7; vertical-align:top; }
+  tr:last-child td { border-bottom:none; }
+
+  code { font-family:Consolas,"Courier New",monospace; font-size:12px;
+         background:#f2f5f9; border:1px solid #d9e0ea; border-radius:4px; padding:1px 5px; }
+  .before { color:#b04a66; }        /* 改前：淡粉，项目里唯一的错误色 */
+  .after  { color:#146e82; font-weight:600; }
+  .tag { display:inline-block; border-radius:20px; padding:1px 10px; font-size:11px; font-weight:600; }
+  .t-bad { background:#fceef2; color:#b04a66; border:1px solid #f0c8d4; }
+  .t-ok  { background:#e8f1f8; color:#1d4f8c; border:1px solid #b9d0e6; }
+  .mono { font-family:Consolas,"Courier New",monospace; font-size:11.5px; line-height:1.75;
+          background:#f7f9fc; border:1px solid #e3e9f1; border-radius:6px; padding:10px 12px;
+          white-space:pre-wrap; word-break:break-all; color:#2b3442; }
+  .zero { color:#146e82; font-weight:700; }
+  .ft { margin-top:18px; font-size:12px; color:#64748b; }
+</style>
+</head>
+<body>
+
+<h1>Day 23 · 步骤 3 ｜ 三类错误提示统一（改前 / 改后对照）</h1>
+<div class="sub">分法：按 HTTP 语义（老大 Day 23 拍板）　·　验证方式：真起服务打真请求，14 项全过　·　时间：2026-10-09 18:52</div>
+
+<div class="card">
+  <h2>今天改的是哪句？——答：把三处「裸报错」换成人话</h2>
+  <div class="why">改前用户页面上会出现 <code>not found</code>、<code>TypeError: Failed to fetch</code>、<code>relation "public.posts" does not exist</code> 这类英文。现在全部换成中文，并且技术原文挪到<code>detail</code> 字段供开发者查。</div>
+
+  <table>
+    <thead><tr><th style="width:78px">类别</th><th style="width:112px">errorCode</th><th>用户看到的中文</th><th style="width:74px">状态码</th></tr></thead>
+    <tbody>
+      <tr><td>第一类<br><span class="muted" style="font-size:11px">你传的不对</span></td><td><code>BAD_REQUEST</code></td><td>你提交的内容有问题，请检查后再试一次。</td><td><b>400</b></td></tr>
+      <tr><td>第二类<br><span class="muted" style="font-size:11px">要找的没有</span></td><td><code>NOT_FOUND</code></td><td>没找到要找的内容，它可能已经被删掉了。</td><td><b>404</b></td></tr>
+      <tr><td rowspan="3">第三类<br><span class="muted" style="font-size:11px">我们这边坏了</span></td><td><code>SERVER_ERROR</code></td><td>服务器出错了，请稍后重试。</td><td><b>500</b></td></tr>
+      <tr><td><code>DB_UNREACHABLE</code></td><td>服务器暂时连不上数据库，请稍后重试。</td><td><b>502</b></td></tr>
+      <tr><td><code>NOT_CONFIGURED</code></td><td>服务还没配置好，请稍后重试。</td><td><b>503</b></td></tr>
+    </tbody>
+  </table>
+  <div class="why" style="margin-top:12px;margin-bottom:0">
+    为什么要 <code>errorCode</code>：前端要区分「是我的错」还是「服务器的错」，不能去猜中文文案长什么样。中文给人看，code 给机器看。
+  </div>
+</div>
+
+<div class="card">
+  <h2>改前 vs 改后 · 真跑实测输出</h2>
+  <div class="why">起了一个本地假数据库（故意返回英文技术报错），再打真 HTTP 请求拿到的真实响应体。</div>
+
+  <div style="margin-bottom:14px">
+    <div style="font-size:12px;margin-bottom:5px"><span class="tag t-bad">改前</span>404 路由没匹配上</div>
+    <div class="mono before">{"ok":false,"error":"not found","receivedPath":"/anything-not-matched"}</div>
+    <div style="font-size:12px;margin:12px 0 5px"><span class="tag t-ok">改后</span></div>
+    <div class="mono after">{"ok":false,"error":"没找到要找的内容，它可能已经被删掉了。","errorCode":"NOT_FOUND","detail":"no route for /anything-not-matched"}</div>
+  </div>
+
+  <div style="margin-bottom:14px">
+    <div style="font-size:12px;margin-bottom:5px"><span class="tag t-bad">改前</span>数据库报错（最刺眼的一条，整句英文甩到页面上）</div>
+    <div class="mono before">{"ok":false,"error":"数据库 REST API 返回 400：{\"code\":\"42P01\",\"message\":\"relation \"public.posts\" does not exist\"..."}</div>
+    <div style="font-size:12px;margin:12px 0 5px"><span class="tag t-ok">改后</span></div>
+    <div class="mono after">{"ok":false,"error":"服务器暂时连不上数据库，请稍后重试。","errorCode":"DB_UNREACHABLE","detail":"数据库 REST API 返回 400：{\"code\":\"42P01\",..."}</div>
+    <div class="why" style="margin:8px 0 0">
+      注意 <code>detail</code> 里英文原文<b>还在</b>——没扔掉，只是挪走了。页面上给用户看的是中文，出问题时开发者看 detail 照样能定位。
+    </div>
+  </div>
+
+  <div>
+    <div style="font-size:12px;margin-bottom:5px"><span class="tag t-bad">改前</span>服务没配置好</div>
+    <div class="mono before">{"ok":false,"error":"CLOUDBASE_API_KEY 未配置（在云函数环境变量里加 CLOUDBASE_API_KEY）"}</div>
+    <div style="font-size:12px;margin:12px 0 5px"><span class="tag t-ok">改后</span></div>
+    <div class="mono after">{"ok":false,"error":"服务还没配置好，请稍后重试。","errorCode":"NOT_CONFIGURED","detail":"CLOUDBASE_API_KEY 未配置..."}</div>
+  </div>
+</div>
+
+<div class="card">
+  <h2>前端也改了：不然英文还在屏幕上</h2>
+  <div class="why">后端改完只是治了后端那些报错。浏览器端的 fetch 失败照样会把英文怼到页面上，所以四个页面各加了一个翻译函数。</div>
+  <table>
+    <thead><tr><th style="width:230px">浏览器报的英文</th><th>改成的中文</th></tr></thead>
+    <tbody>
+      <tr><td><code>TypeError: Failed to fetch</code></td><td>连不上服务器，请检查网络后重试</td></tr>
+      <tr><td><code>timeout / abort</code></td><td>服务器响应太慢了，请稍后重试</td></tr>
+      <tr><td><code>Unexpected token &lt; in JSON</code></td><td>服务器返回的数据格式不对，请稍后重试</td></tr>
+      <tr><td><code>r.status</code>（裸数字 500）</td><td>服务器返回 500，请稍后重试</td></tr>
+    </tbody>
+  </table>
+  <div class="why" style="margin-top:12px;margin-bottom:0">
+    英文原文不丢，落到浏览器控制台（<code>console.warn</code>），页面上不再出现。
+  </div>
+</div>
+
+<div class="card">
+  <h2>自查结果</h2>
+  <table>
+    <thead><tr><th style="width:300px">检查项</th><th style="width:90px">结果</th><th>说明</th></tr></thead>
+    <tbody>
+      <tr><td>静态自查 34 项</td><td><span class="tag t-ok">34 通过 / 0 失败</span></td><td>四个页面 JS 语法、三类文案、前端裸报错清零</td></tr>
+      <tr><td>真跑实测 14 项</td><td><span class="tag t-ok">14 通过 / 0 失败</span></td><td>真起服务打真请求，验返回体确实是中文</td></tr>
+      <tr><td>页面残留英文黑话</td><td><span class="tag t-ok"><span class="zero">0</span> 条</span></td><td>用正则扫 <code>TypeError / Failed to fetch / relation / undefined</code> 等词，命中 0</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="ft">证据留存：数字全部来自 day23-error-check.cjs（34 项）与 day23-error-live.mjs（14 项）实跑输出，非手写结论。截图两张之第二张。</div>
+
+</body>
+</html>
