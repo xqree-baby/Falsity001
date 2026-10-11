@@ -483,7 +483,12 @@
       if (!category) { setStatus('请选择分类', 'error'); return; }
       setStatus('提交中…');
       try {
-        const r = await fetch('/api/posts?as=' + encodeURIComponent(as), {
+        // Day 24 修：原来这里是相对路径 fetch('/api/posts?as=' + as, ...)，
+        //   请求打到静态托管自己名下，那儿没有 /api/ → 必然 404，
+        //   点「发布」永远失败（同 Day 21 详情页/发评论同款病根，Day 20 改 API_BASE 时漏了这几段）。
+        //   改成 API_BASE 绝对地址，和上面fetchPosts / loadPost 同一口径。
+        // ⚠️ 后端也需要有这条路由：Day 24 同时在云函数里补了 POST /posts（原先只有 GET/PATCH）。
+        const r = await fetch(API_BASE + '/posts?as=' + encodeURIComponent(as), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ type, title, body, category })

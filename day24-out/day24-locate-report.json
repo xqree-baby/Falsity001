@@ -1,0 +1,50 @@
+[
+  {
+    "id": "H1",
+    "name": "前端相对路径打到静态托管",
+    "verdict": "命中",
+    "evidence": "POST https://falsity-mock005-falsity001-d1gowkogp40251a26.webapps.tcloudbase.com/api/posts => 404，content-type=text/html。静态托管里没有 /api，返回的是 HTML 404 页面（CloudBase 自己的 404 页）。"
+  },
+  {
+    "id": "H2",
+    "name": "后端没注册 POST /posts 路由",
+    "verdict": "命中",
+    "evidence": "POST https://falsity001-d1gowkogp40251a26-1499370664.ap-shanghai.app.tcloudbase.com/api/posts => 404，返回体 {\"ok\":false,\"error\":\"not found\",\"receivedPath\":\"/api/posts\"}。receivedPath 是自家函数的字段 → 请求已进函数，是函数自己说'没这条路由'，不是网关拦的。"
+  },
+  {
+    "id": "H3",
+    "name": "网关没绑定这条路由",
+    "verdict": "排除",
+    "evidence": "GET https://falsity001-d1gowkogp40251a26-1499370664.ap-shanghai.app.tcloudbase.com/api/posts => 200。同一路径 GET 通得了，说明路径已绑定；且 Day 22 实测过网关按路径绑定不区分方法，POST 同路径不用多绑。"
+  },
+  {
+    "id": "H4",
+    "name": "跨域被拦（ACAO 配两遍）",
+    "verdict": "排除",
+    "evidence": "响应头 Access-Control-Allow-Origin: https://falsity-mock005-falsity001-d1gowkogp40251a26.webapps.tcloudbase.com。只有一个值、没逗号拼接 → 没配重；而且这次请求拿到了 404 状态码（跨域被掐时 JS 侧根本读不到状态码，只剩 Failed to fetch）。"
+  },
+  {
+    "id": "H5",
+    "name": "表单字段缺失被后端拒",
+    "verdict": "排除",
+    "evidence": "POST 网关/posts 空 body => 404。404 而不是 400，且请求连路由都没匹配上，轮不到字段校验。"
+  },
+  {
+    "id": "H6",
+    "name": "静态托管跑的是旧前端",
+    "verdict": "排除",
+    "evidence": "静态托管首页 HTML 里能搜到 API_BASE 常量（网关域名）。能搜到说明静态托管是 Day 20 之后部署的，前端整体不旧——只是发帖那一段漏改了。"
+  },
+  {
+    "id": "H7",
+    "name": "后端整体挂了 / 数据库连不上",
+    "verdict": "排除",
+    "evidence": "GET /health => 200；GET /posts => 200 且带 count 字段（真查到了数据库）。后端和数据库都活着。"
+  },
+  {
+    "id": "H8",
+    "name": "线上 api 函数版本比本地旧（Day 23 未部署）",
+    "verdict": "命中",
+    "evidence": "GET /favorites/extra => 404，返回体 {\"ok\":false,\"error\":\"not found\",\"receivedPath\":\"/api/favorites/extra\"}。老版本 404 是手写的{ok:false,error:'not found',receivedPath}；本地 Day 23 已改成 fail() 会带 errorCode。线上没有 errorCode ⇒ 线上是 Day 22 那版。（注意：/api/health 是 Day 15 的独立函数，它的 deployedAt 不能代表 api 函数的版本，别拿它当判据。）"
+  }
+]

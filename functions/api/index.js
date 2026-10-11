@@ -148,6 +148,16 @@ function newCommentId() {
   return 'c' + Date.now().toString(36);
 }
 
+// ---------------- 帖子编号规则（Day 24 新增） ----------------
+// 生成帖子编号：p + 时间戳 base36（如 p1a2b3c4d5）。理由同 newFavoriteId：
+//   不查表取最大 pXXX 再 +1（查完再插中间有缝，并发两个请求会拿到同一个号、第二个撞主键报错）。
+// ⚠️ 为什么不接着用 p009往后排成 p010：
+//   「先查最大号再 +1」在并发下必然撞车（两个请求同时查到 p009，都算出 p010），
+//   id 自己带时间戳就不用查表，天然不会重复。
+function newPostId() {
+  return 'p' + Date.now().toString(36);
+}
+
 // ---------------- 一条日志（Day 18 余力加练：方便以后排查问题） ----------------
 // 只记「谁、做了什么、对哪条记录、成功还是被拒」，不带请求体正文——
 // 帖子内容属于用户数据，不进日志。
@@ -417,6 +427,99 @@ async function handleCreateComment(req, res) {
   } catch (e) {
     logLine('comment.error', `post_id=${postId} 错误=${e.message}`);
     throw e; // 交给最外层catch翻成 502/503
+  }
+}
+
+// POST /api/posts —— 发一篇新帖子（Day 24 新增）
+//
+// 背景：Day 24 排查出来的真 bug。前端点「发布」必然 404，两层原因：
+//   ① 前端用了相对路径 fetch('/api/posts')，请求打到静态托管自己名下（那儿没有 /api/）
+//   ② 就算改成绝对地址，云函数路由表里本来就没有 POST /posts 这条分支（只有 GET 和 PATCH）
+// 两层都得补，只改一层还是 404。这条注释留着，别哪天又把它删了。
+//
+// 校验顺序照 handleCreateComment / handleFavorite 那一套：先读体 → 解析 → 逐字段校验 → 写。
+// 校验顺序的讲究：便宜且最容易错的先查（类型白名单、标题正文非空），数据库往返放最后。
+//
+// ⚠️ 身份问题（本日已知短板，先说清不假装做了）：
+//   前端把身份放在 URL 上（?as=verified），这里是照着 URL 决定的，
+//   也就是说**改一下地址栏就能冒充认证用户**。真正的做法是登录后由服务端从会话里读身份、
+//     不信客户端传来的值。项目还没做登录系统（见 MEMORY 的愿望清单），
+//   所以这一层现在只能靠约定，等有登录系统时必须回来把这里换掉。
+async function handleCreatePost(req, res, query) {
+  const as = query.get('as') === 'verified' ? 'verified' : 'anonymous';
+
+  const raw = await readBody(req);
+  let body;
+  try {
+    body = raw ? JSON.parse(raw) : {};
+  } catch (e) {
+    return fail(res, 400, `请求体 JSON 解析失败：${e.message}`);
+  }
+  if (typeof body !== 'object' || Array.isArray(body) || !body) {
+    return fail(res, 400, '请求体格式不对（要 {type,title,body,category} 这样的对象）');
+  }
+
+  // 类型白名单：数据库里有 CHECK 约束挡着，但前端那句「不允许的发」比数据库报错更好懂。
+  // 只允许 opinion / question 两个值，跟 Day 13 定的「帖子只有观点和提问两类」对齐。
+  const type = body.type === 'opinion' ? 'opinion' : body.type === 'question' ? 'question' : '';
+  if (!type) {
+    return fail(res, 400, `type 只能是 opinion 或 question，收到了 ${JSON.stringify(body.type)}`);
+  }
+
+  const title = typeof body.title === 'string' ? body.title.trim() : '';
+  // 长度上限跟数据库的 VARCHAR(200) 对齐（留 10 字余量给多字节字符）。
+  // 为什么不直接让数据库报错：超长的报错原文是英文 SQL 错误，用户看不懂也不知道怎么改。
+  if (!title) return fail(res, 400, '标题不能为空');
+  if (title.length > 200) return fail(res, 400, `标题太长了（${title.length} 字），请控制在 200 字以内`);
+
+  const text = typeof body.body === 'string' ? body.body.trim() : '';
+  if (!text) return fail(res, 400, '正文不能为空');
+  if (text.length > 10000) return fail(res, 400, `正文太长了（${text.length} 字），请分条发`);
+
+  const category = typeof body.category === 'string' && body.category.trim() ? body.category.trim() : '未分类';
+  if (category.length > 32) return fail(res, 400, '分类名太长了（上限 32 字）');
+
+  // 未认证用户只能发提问帖：跟前端 initIdentity 的限制同一个口径。
+  // ⚠️ 这条同样是「客户端说了算」，理由同上面的身份问题。写成规则是为了让规则明确可见，
+  //   等登录系统上线，这两处都要改成「从会话读身份」。
+  if (as === 'anonymous' && type === 'opinion') {
+    return fail(res, 400, '未认证用户只能发提问帖（要发观点帖请切换到认证发帖）');
+  }
+
+  const id = newPostId();
+  try {
+    const saved = await db.insertPost({
+      id,
+      type,
+      category,
+      title,
+      body: text,
+      author: '匿名用户',
+      author_verified: as === 'verified',
+      // ★ 关键一行：不管谁发的、什么类型，一律进审核队列。
+      //   Day 13 定的规则——所有帖子（含认证用户）都要审核通过才上首页。
+      //   这里写 false 就等于把审核阀焊死，绝不能这么干。
+      pending: true,
+      views: 0,
+      created_at: new Date().toISOString(),
+    });
+    logLine('post.create.ok', `id=${saved.id} type=${type} as=${as} pending=true`);
+    return json(res, 201, {
+      ok: true,
+      post: {
+        id: saved.id,
+        type: saved.type,
+        category: saved.category,
+        title: saved.title,
+        author: saved.author,
+        authorVerified: saved.author_verified,
+        pending: saved.pending,
+        createdAt: saved.created_at,
+      },
+    });
+  } catch (e) {
+    logLine('post.create.error', `type=${type} as=${as} 错误=${e.message}`);
+    throw e; // 交给最外层 catch 翻成 502/503
   }
 }
 
@@ -755,6 +858,11 @@ const server = http.createServer(async (req, res) => {
   if (path.startsWith('/api/')) path = path.slice(4); // /api/hot -> /hot（网关前缀兼容）
 
   try {
+    // 发帖：POST /posts（Day 24 新增）
+    // 和 GET /posts 是同一个路径、只是换个方法 —— 同一个资源用不同方法表达不同动作，
+    //   这是 REST 的基本约定。⚠️ CloudBase 网关按「路径」绑定不区分方法（Day 22 实测），
+    //   所以这一条不用去控制台多绑路由，GET /posts 能进来，POST /posts 也能进来。
+    if (req.method === 'POST' && path === '/posts') return await handleCreatePost(req, res, u.searchParams);
     if (req.method === 'GET' && path === '/posts') return await handlePosts(req, res);
     // 单篇详情：GET /api/post?id=p001（Day 21）
     // ⚠️ 为什么用 query 不用 /api/posts/p001：

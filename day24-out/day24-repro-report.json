@@ -1,0 +1,28 @@
+{
+  "中间页是否出现": true,
+  "页面提示原文": {
+    "text": "失败：404",
+    "cls": "notice error shake"
+  },
+  "控制台消息": [
+    {
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    },
+    {
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    },
+    {
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    }
+  ],
+  "相关请求": [
+    {
+      "method": "POST",
+      "url": "https://falsity-mock005-falsity001-d1gowkogp40251a26.webapps.tcloudbase.com/api/posts?as=verified",
+      "status": 404
+    }
+  ]
+}

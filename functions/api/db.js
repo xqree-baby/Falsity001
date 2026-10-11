@@ -231,6 +231,35 @@ async function findCommentById(commentId) {
   return rows[0];
 }
 
+// ---------------- 发帖：写入一篇新帖子（Day 24 新增） ----------------
+
+// 写入一篇帖子（POST /posts，请求体是要写的那一行）。
+// 套路和 insertComment 完全一样：值全走 JSON 请求体（PostgREST 天然参数化，没有 SQL 拼接风险），
+//   用 Prefer: return=representation 让数据库把刚插进去的行回给我们，
+//   返回给前端的 id / created_at 是库里的真值，不是我们自己编的。
+// ⚠️ pending 这一列必须由业务层显式传 true，不能靠数据库默认值：
+//   Day 13 定的规则是「所有帖子都要审核才上首页」，
+//   写 pending=false 就等于绕过审核直接上线，属于把安全阀焊死。这列只能往 true 上写。
+async function insertPost(row) {
+  requireKey();
+  const res = await fetch(`${DB_BASE}/posts`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${API_KEY}`,
+      'Content-Type': 'application/json',
+      Prefer: 'return=representation',
+    },
+    body: JSON.stringify([row]),
+  });
+  if (!res.ok) {
+    const e = new Error(`数据库 REST API 返回 ${res.status}：${(await res.text()).slice(0, 300)}`);
+    e.dbStatus = res.status;
+    throw e;
+  }
+  const rows = await res.json();
+  return rows[0];
+}
+
 // ---------------- 修改与删除（Day 22 新增） ----------------
 
 // 改一条帖子（PATCH /posts?id=eq.XXX，请求体是要改的字段）。
@@ -294,9 +323,9 @@ async function deleteComment(commentId) {
   return rows[0]; // 空数组 = 这一行本来就不存在
 }
 
-// 只导出业务层需要的十个函数（Day 22 加了 updatePost / deleteComment）。
+// 只导出业务层需要的函数（Day 22 加了 updatePost / deleteComment，Day 24 加了 insertPost）。
 // dbGet / requireKey / DB_BASE 这些一律不导出——业务层不该有绕过去路的办法，
-// 想查什么就从这十个里挑，或者以后真需要新的查法时在这里加一个函数。
+// 想查什么就从这些里挑，或者以后真需要新的查法时在这里加一个函数。
 module.exports = {
   listApprovedPosts,
   countCommentsByPost,
@@ -308,6 +337,7 @@ module.exports = {
   listFavoritesWithPosts,
   insertFavorite,
   insertComment,
+  insertPost,
   updatePost,
   deleteComment,
   upsertTrends,

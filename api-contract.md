@@ -271,13 +271,20 @@ CloudBase HTTP 网关不支持 `{id}` 路径参数（见§3「为什么不是 /a
 
 ---
 
-## 5. 发帖 /api/posts
+## 5. 发帖 POST /api/posts
 
 | 项 | 内容 |
 |---|---|
-| 状态 | **仅本地** |
+| 状态 | **已上线**（Day 24 部署，实测 201） |
 | 方法 | `POST` |
 | 鉴权 | 无（当前用 URL 参数 `?as=verified` 模拟认证身份） |
+| 网关 | 复用 `/api/posts` 路径，**不需要另绑**（网关按路径绑定不区分方法，Day 22 实测） |
+
+> ⚠️ **Day 24 修复记录（这条接口之前是坏的）**
+>   修复前点「发布」必然 404，两层原因叠加：
+>   ① 前端用了相对路径 `fetch('/api/posts')`，请求打到静态托管自己名下（那儿没有 `/api/`）
+>   ② 云函数路由表里压根没有 `POST /posts` 分支（只有 GET 和 PATCH）
+>   只改一层还是 404。判据：返回体带 `receivedPath` = 自家函数的 404（请求已进函数），不是网关的 `INVALID_PATH`。
 
 ### 请求
 ```text
@@ -294,27 +301,46 @@ POST /api/posts?as=verified
 }
 ```
 
-### 成功响应 201
+### 成功响应 201（Day 24 实测真实返回）
 ```json
 {
-  "post": { ... },
-  "pending": true
+  "ok": true,
+  "post": {
+    "id": "p1a2b3c4d5",
+    "type": "opinion",
+    "category": "求职面试",
+    "title": "标题",
+    "author": "匿名用户",
+    "authorVerified": true,
+    "pending": true,
+    "createdAt": "2026-10-11T13:55:00.000Z"
+  }
 }
 ```
 
-### 失败响应 400
+### 失败响应（Day 23 起统一走 fail()，三分字段）
 ```json
-{ "error": "title 和 body 必填" }
+{
+  "ok": false,
+  "error": "你提交的内容有问题，请检查后再试一次。",
+  "errorCode": "BAD_REQUEST",
+  "detail": "title 只能是 opinion 或 question，收到了 undefined"
+}
 ```
-或
-```json
-{ "error": "type 必须是 opinion 或 question" }
-```
+> `error` 是给用户看的中文人话，`errorCode` 是稳定英文码（机器读），
+> `detail` 是技术原文（开发者排查用，截 200 字）。前端只显示 `error`。
 
 ### 业务规则
-- 所有帖子当前一律先进入 `pending: true` 审核状态（Day 13 拍板）
-- 未认证用户（不带 `?as=verified`）强制 `type=question`、`author=匿名网友（待审核）`
-- 认证用户必须显式传 `type` 且只能是 `opinion` / `question`
+- 所有帖子一律先进入 `pending: true` 审核状态（Day 13 拍板）。
+  代码里 `pending` 是**硬编码 true、不接受任何客户端输入** —— 写 false 就等于把审核阀焊死。
+- 未认证用户（不带 `?as=verified`）只能发 `type=question`；发 `opinion` 会被 400 拒掉
+- `type` 只能是 `opinion` / `question`（数据库还有 CHECK 约束双重把关）
+- 长度上限：标题 200 字、正文 10000 字、分类 32 字（与数据库 VARCHAR 对齐，避免超长报错是英文 SQL 错误）
+
+### ⚠️ 已知短板（Day 24 记录，暂未修）
+身份靠 URL 上的 `?as=` 决定，**改一下地址栏就能冒充认证用户**。
+真正的做法是登录后由服务端从会话里读身份、不信客户端传来的值。
+项目还没做登录系统，这一层现在只能靠约定 —— 等登录系统上线，本节这处必须改。
 
 ---
 

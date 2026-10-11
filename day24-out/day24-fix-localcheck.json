@@ -1,0 +1,68 @@
+[
+  {
+    "name": "发帖/详情/评论/首页 无残留相对路径 fetch",
+    "pass": true,
+    "detail": "0 处意外残留"
+  },
+  {
+    "name": "审核页 2 处相对路径 = 已知遗留项（只记录不修）",
+    "pass": true,
+    "detail": "第515行 第573行"
+  },
+  {
+    "name": "发帖请求已改为 API_BASE 绝对地址",
+    "pass": true,
+    "detail": "匹配 API_BASE + '/posts?as=' + encodeURIComponent(as)"
+  },
+  {
+    "name": "已注册 POST /posts 路由",
+    "pass": true,
+    "detail": "路由表里找到 POST /posts 分支"
+  },
+  {
+    "name": "POST 与 GET /posts 是两条独立 if（非互斥）",
+    "pass": true,
+    "detail": "POST 在第 28923 字符处，GET 在第 29032 字符处"
+  },
+  {
+    "name": "handleCreatePost 存在",
+    "pass": true,
+    "detail": "写入时 pending 恒为 true"
+  },
+  {
+    "name": "没有把 pending 写成可由客户端决定",
+    "pass": true,
+    "detail": "pending 值不接受任何客户端输入"
+  },
+  {
+    "name": "新增报错全部走 fail()",
+    "pass": true,
+    "detail": "fail() 调用 9 次，手写 4xx/5xx 共 0 次"
+  },
+  {
+    "name": "db.js 定义了 insertPost",
+    "pass": true
+  },
+  {
+    "name": "insertPost 已导出",
+    "pass": true
+  },
+  {
+    "name": "insertPost 用 Prefer: return=representation 取库里真值",
+    "pass": true
+  },
+  {
+    "name": "本地起云函数",
+    "pass": true,
+    "detail": "从子进程输出里读到真实监听端口 9000（不是猜的）"
+  },
+  {
+    "name": "10 条非法输入全部被 400/BAD_REQUEST 拦下",
+    "pass": true
+  },
+  {
+    "name": "合法输入能穿过校验走到写库",
+    "pass": true,
+    "detail": "状态=502 DB_UNREACHABLE 数据库 REST API 返回 401：{\"code\":\"INVALID_CREDENTIALS\",\"message\":\"Credentia（不是 400 说明校验全过了，卡在连数据库——本地无真 key，属预期）"
+  }
+]

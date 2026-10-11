@@ -1,0 +1,202 @@
+{
+  "逐条": [
+    {
+      "用例": "空 body",
+      "字节数": 0,
+      "状态码": 400,
+      "errorCode": "BAD_REQUEST",
+      "说明": "type 只能是 opinion 或 question，收到了 undefined"
+    },
+    {
+      "用例": "纯空白 body",
+      "字节数": 7,
+      "状态码": 400,
+      "errorCode": "BAD_REQUEST",
+      "说明": "请求体 JSON 解析失败：Unexpected end of JSON input"
+    },
+    {
+      "用例": "坏 JSON",
+      "字节数": 7,
+      "状态码": 400,
+      "errorCode": "BAD_REQUEST",
+      "说明": "请求体 JSON 解析失败：Expected property name or '}' in JSON at posit"
+    },
+    {
+      "用例": "截断的 JSON",
+      "字节数": 17,
+      "状态码": 400,
+      "errorCode": "BAD_REQUEST",
+      "说明": "请求体 JSON 解析失败：Expected ',' or '}' after property value in JS"
+    },
+    {
+      "用例": "JSON 是数组",
+      "字节数": 7,
+      "状态码": 400,
+      "errorCode": "BAD_REQUEST",
+      "说明": "请求体格式不对（要 {type,title,body,category} 这样的对象）"
+    },
+    {
+      "用例": "JSON 是字符串",
+      "字节数": 7,
+      "状态码": 400,
+      "errorCode": "BAD_REQUEST",
+      "说明": "请求体格式不对（要 {type,title,body,category} 这样的对象）"
+    },
+    {
+      "用例": "JSON 是 null",
+      "字节数": 4,
+      "状态码": 400,
+      "errorCode": "BAD_REQUEST",
+      "说明": "请求体格式不对（要 {type,title,body,category} 这样的对象）"
+    },
+    {
+      "用例": "JSON 是数字",
+      "字节数": 2,
+      "状态码": 400,
+      "errorCode": "BAD_REQUEST",
+      "说明": "请求体格式不对（要 {type,title,body,category} 这样的对象）"
+    },
+    {
+      "用例": "字段全是 null",
+      "字节数": 54,
+      "状态码": 400,
+      "errorCode": "BAD_REQUEST",
+      "说明": "type 只能是 opinion 或 question，收到了 null"
+    },
+    {
+      "用例": "type 大小写错",
+      "字节数": 41,
+      "状态码": 400,
+      "errorCode": "BAD_REQUEST",
+      "说明": "type 只能是 opinion 或 question，收到了 \"Opinion\""
+    },
+    {
+      "用例": "type 空字符串",
+      "字节数": 34,
+      "状态码": 400,
+      "errorCode": "BAD_REQUEST",
+      "说明": "type 只能是 opinion 或 question，收到了 \"\""
+    },
+    {
+      "用例": "标题正好 200 字（边界内）",
+      "字节数": 240,
+      "状态码": 502,
+      "errorCode": "DB_UNREACHABLE",
+      "说明": "数据库 REST API 返回 401：{\"code\":\"INVALID_CREDENTIALS\",\"message\":"
+    },
+    {
+      "用例": "标题 201 字（边界外）",
+      "字节数": 241,
+      "状态码": 400,
+      "errorCode": "BAD_REQUEST",
+      "说明": "标题太长了（201 字），请控制在 200 字以内"
+    },
+    {
+      "用例": "正文正好 10000 字（边界内）",
+      "字节数": 10040,
+      "状态码": 502,
+      "errorCode": "DB_UNREACHABLE",
+      "说明": "数据库 REST API 返回 401：{\"code\":\"INVALID_CREDENTIALS\",\"message\":"
+    },
+    {
+      "用例": "正文 10001 字（边界外）",
+      "字节数": 10041,
+      "状态码": 400,
+      "errorCode": "BAD_REQUEST",
+      "说明": "正文太长了（10001 字），请分条发"
+    },
+    {
+      "用例": "分类 32 字（边界内）",
+      "字节数": 87,
+      "状态码": 502,
+      "errorCode": "DB_UNREACHABLE",
+      "说明": "数据库 REST API 返回 401：{\"code\":\"INVALID_CREDENTIALS\",\"message\":"
+    },
+    {
+      "用例": "分类 33 字（边界外）",
+      "字节数": 88,
+      "状态码": 400,
+      "errorCode": "BAD_REQUEST",
+      "说明": "分类名太长了（上限 32 字）"
+    },
+    {
+      "用例": "标题里塞 HTML 标签",
+      "字节数": 92,
+      "状态码": 502,
+      "errorCode": "DB_UNREACHABLE",
+      "说明": "数据库 REST API 返回 401：{\"code\":\"INVALID_CREDENTIALS\",\"message\":"
+    },
+    {
+      "用例": "SQL 注入串",
+      "字节数": 73,
+      "状态码": 502,
+      "errorCode": "DB_UNREACHABLE",
+      "说明": "数据库 REST API 返回 401：{\"code\":\"INVALID_CREDENTIALS\",\"message\":"
+    },
+    {
+      "用例": "emoji 和生僻字",
+      "字节数": 61,
+      "状态码": 502,
+      "errorCode": "DB_UNREACHABLE",
+      "说明": "数据库 REST API 返回 401：{\"code\":\"INVALID_CREDENTIALS\",\"message\":"
+    },
+    {
+      "用例": "正文带换行和制表",
+      "字节数": 52,
+      "状态码": 502,
+      "errorCode": "DB_UNREACHABLE",
+      "说明": "数据库 REST API 返回 401：{\"code\":\"INVALID_CREDENTIALS\",\"message\":"
+    },
+    {
+      "用例": "未认证发观点帖",
+      "字节数": 41,
+      "状态码": 400,
+      "errorCode": "BAD_REQUEST",
+      "说明": "未认证用户只能发提问帖（要发观点帖请切换到认证发帖）"
+    },
+    {
+      "用例": "未认证发提问帖（应放行到写库）",
+      "字节数": 42,
+      "状态码": 502,
+      "errorCode": "DB_UNREACHABLE",
+      "说明": "数据库 REST API 返回 401：{\"code\":\"INVALID_CREDENTIALS\",\"message\":"
+    },
+    {
+      "用例": "as 参数乱填",
+      "字节数": 41,
+      "状态码": 400,
+      "errorCode": "BAD_REQUEST",
+      "说明": "未认证用户只能发提问帖（要发观点帖请切换到认证发帖）"
+    },
+    {
+      "用例": "as 传数组",
+      "字节数": 41,
+      "状态码": 502,
+      "errorCode": "DB_UNREACHABLE",
+      "说明": "数据库 REST API 返回 401：{\"code\":\"INVALID_CREDENTIALS\",\"message\":"
+    },
+    {
+      "用例": "超大 body（200KB）",
+      "字节数": 200040,
+      "状态码": 0,
+      "errorCode": null,
+      "说明": null
+    }
+  ],
+  "汇总": {
+    "总用例数": 26,
+    "服务崩溃": true,
+    "返回非预期状态码": [
+      {
+        "用例": "超大 body（200KB）",
+        "字节数": 200040,
+        "状态码": 0,
+        "errorCode": null,
+        "说明": null
+      }
+    ],
+    "写入成功的用例": [],
+    "被400拦下的用例数": 16,
+    "走到数据库的用例数": 9
+  }
+}

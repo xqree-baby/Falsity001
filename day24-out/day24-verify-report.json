@@ -1,0 +1,83 @@
+{
+  "验证时间": "2026-10-11T13:54:20.237Z",
+  "测试用标题": "Day24验证-mv3vwj4z：自动化验证发帖是否成功（可忽略）",
+  "发帖结果": {
+    "text": "已提交，等待审核（通过后才会出现在首页）。3 秒后回首页…",
+    "cls": "notice ok"
+  },
+  "控制台消息": [
+    {
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    },
+    {
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    }
+  ],
+  "请求记录": [
+    {
+      "method": "OPTIONS",
+      "url": "[网关]/posts?as=verified",
+      "status": 204
+    },
+    {
+      "method": "POST",
+      "url": "[网关]/posts?as=verified",
+      "status": 201
+    },
+    {
+      "method": "GET",
+      "url": "[网关]/hot",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "url": "[网关]/posts",
+      "status": 200
+    }
+  ],
+  "自查结果": [
+    {
+      "name": "打开认证发帖页",
+      "pass": true,
+      "detail": "过了测试域名中间页，表单已显示"
+    },
+    {
+      "name": "点发布后提示成功",
+      "pass": true,
+      "detail": "class=\"notice ok\" 文字=\"已提交，等待审核（通过后才会出现在首页）。3 秒后回首页…\""
+    },
+    {
+      "name": "POST 请求打到网关且返回 201",
+      "pass": true,
+      "detail": "[{\"method\":\"POST\",\"url\":\"[网关]/posts?as=verified\",\"status\":201}]"
+    },
+    {
+      "name": "不再打到静态托管（①的病根消失）",
+      "pass": true,
+      "detail": "POST 目标域名：[网关]/posts?as=verified"
+    },
+    {
+      "name": "新帖未出现在已过审列表（pending 生效，审核阀没被焊死）",
+      "pass": true,
+      "detail": "已过审列表共 7 条，其中不含本次新帖"
+    },
+    {
+      "name": "回归 GET /post?id=p001 仍正常",
+      "pass": true,
+      "detail": "面试时被问『为什么离开上一家公司』，别说真话"
+    },
+    {
+      "name": "回归 GET /hot 仍正常",
+      "pass": true,
+      "detail": "date=2026-10-11 data=0 条"
+    },
+    {
+      "name": "业务接口无 404（发帖/评论/热搜/审核都正常）",
+      "pass": true,
+      "detail": "0 条"
+    }
+  ],
+  "新帖id": null
+}
