@@ -44,6 +44,8 @@ node release-check.mjs
 
 可选：`node release-check.mjs --html 输出路径.html` 会额外生成一份HTML 结果页，方便截图。
 
+> 项目README 的「Skill 与发布前检查」一节有面向人的用法说明；本文件是给执行者看的完整判据。两边以本文件为准。
+
 ---
 
 ## C1 密钥泄漏

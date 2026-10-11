@@ -95,6 +95,64 @@ flowchart TD
 - ❌ 点赞 / 私信 / 关注 / 缓存 / 支付
 - ❌ 项目正式命名（Day 8+ 再定）
 
+## Skill 与发布前检查
+
+本仓库的 Skill 放在 [`skills/`](./skills/) 下，**每个 Skill 一个目录**，含 `SKILL.md`（怎么用）+ `RUN_LOG.md`（历次调用记录，只追加不覆盖）+ 可选的 `CHECKLIST.md`（设计依据）。
+
+### release-check：发布前检查（Day 25 加）
+
+**什么时候用**：要部署/发布/上线之前，或改过 `functions/api/*.js`、`public/*.html`、`.gitignore`、`.env` 相关文件之后。
+
+```bash
+node release-check.mjs
+```
+
+想出截图/存档报告就加 `--html`：
+
+```bash
+node release-check.mjs --html day25-out/check.html
+```
+
+**退出码**（可以直接用在脚本里判断）：
+
+| 码 | 含义 |
+|---|---|
+| `0` | 已实现项全部通过 |
+| `1` | 有失败项 |
+| `2` | **脚本自身出错**（网络/环境问题）——**不等于检查失败**，别误判成后端故障 |
+
+**当前实现范围**（设计依据见 [`skills/release-check/CHECKLIST.md`](./skills/release-check/CHECKLIST.md)）：
+
+| 编号 | 检查项 | 状态 |
+|---|---|---|
+| C1 | 密钥泄漏 | ✅ 已实现 |
+| C2 | 公网可达性 |✅ 已实现 |
+| C3 | 接口契约一致 | ⏳ 未实现 |
+| C4 | 前端错误提示规范 | ⏳ 未实现 |
+| C5 | Git 工作区干净 | ⏳ 未实现 |
+
+C3–C5 **没实现，输出里就标「未实现」，不算通过**。
+
+两个注意点：
+
+- **C2 探活只发 GET**，不发 POST/PATCH/DELETE —— 避免污染线上数据，也避开已知的收藏接口唯一索引冲突。
+- **C1 的判定是「变量名旁有没有像密钥的字面量」**，不是「有没有出现变量名」。仓库里 `API_KEY` 字样出现 9 处全是干净写法（`process.env.CLOUDBASE_API_KEY`、`Bearer ${API_KEY}`），不该被误报。
+
+> ⚠️ **「通过」本身需要被验证。** 一个只会说「通过」的检查工具，和一个坏掉的检查工具，在结果上无法区分。Day 25 建这个 Skill 时做过一次反向验证（故意注入密钥 → 它报警 → 修掉 → 它安静），记录在 [`RUN_LOG.md`](./skills/release-check/RUN_LOG.md)。改动检查逻辑后，建议重做一次。
+
+### filter-check：首页分类筛选检查（Day 12 加）
+
+改了 `public/index.html` 的筛选逻辑、`posts.json` 数据或 `chip` 相关样式后跑。按 `skills/filter-check/SKILL.md` 里的步骤在真浏览器里点一遍，三种情况（有结果 / 无结果 / 清空恢复）都要测。
+
+### 写新 Skill 的约定
+
+- 目录：`skills/<名字>/`
+- `SKILL.md` 开头写 YAML frontmatter（`name` + `description`），`description` 里写清「**什么时候必须调用它**」
+- 正文写：前置条件 / 操作步骤 + 每步的通过标准 / 失败时怎么办
+- 结尾写死「调用记录追加到 `RUN_LOG.md`，格式如何」
+- 明确列出「**什么不算问题**」——避免下一轮误报自己打自己
+- 有意未实现的部分要显式标注，不许装成已通过
+
 ## 下一步
 
 - Day 8+：项目正式命名、引入 Express（替换内置 http 模块）、拆前端资源、引入 npm 包管理
