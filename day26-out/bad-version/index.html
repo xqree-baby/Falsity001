@@ -1,0 +1,848 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>项目 · 首页</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="app wide">
+    <div class="row">
+      <h1>【v1.1 故障演练】首页已损坏</h1>
+      <nav>
+        <a href="#/" data-nav="home">首页</a>
+        <a href="#/submit?as=anonymous" data-nav="submit">匿名发帖</a>
+        <a href="#/submit?as=verified" data-nav="submit">认证发帖</a>
+        <a href="#/admin" data-nav="admin">审核入口</a>
+      </nav>
+    </div>
+  </header>
+
+  <!-- Day 13：单个 HTML 里的三个独立视图，hash 路由切换（# 后变化不刷新页面） -->
+  <main class="container wide">
+
+    <!-- 视图一：首页 -->
+    <section id="view-home" hidden>
+      <h2>首页</h2>
+      <p class="muted">只显示已通过审核的帖子。点击查看详情。</p>
+
+      <!-- 三栏布局：左·热门榜 / 中·帖子列表 / 右·分类筛选 -->
+      <div class="layout">
+        <aside class="side">
+          <h4>热门榜</h4>
+          <div id="hotList"></div>
+
+          <!-- Day 17：今日热搜（真实数据，GET /api/hot；上方是站内热帖，别混） -->
+          <div class="trends-block">
+            <h4>今日热搜</h4>
+            <p class="trends-sub" id="trendsDate"></p>
+            <div class="trends-tabs" id="trendsTabs"></div>
+            <div id="trendsList"><p class="muted small">加载中…</p></div>
+          </div>
+        </aside>
+
+        <div id="list" class="toolbar-wrap"></div>
+
+        <aside class="side">
+          <h4>分类</h4>
+          <div id="cats"></div>
+        </aside>
+      </div>
+    </section>
+
+    <!-- 视图二：发帖 -->
+    <section id="view-submit" hidden>
+      <h2>发帖</h2>
+
+      <div id="identityBar" class="identity-bar"></div>
+
+      <form id="postForm" novalidate>
+        <label for="type">帖子类型</label>
+        <select id="type">
+          <option value="opinion">观点（认证用户可选）</option>
+          <option value="question">提问</option>
+        </select>
+
+        <label for="category">分类</label>
+        <select id="category">
+          <option value="">请选择分类</option>
+        </select>
+
+        <label for="title">标题</label>
+        <input id="title" type="text" maxlength="120" required placeholder="一句话说清楚你要表达什么">
+
+        <label for="body">正文</label>
+        <textarea id="body" maxlength="4000" required placeholder="展开说…"></textarea>
+
+        <div class="toolbar">
+          <button type="submit">发布</button>
+          <span id="status" class="small muted"></span>
+        </div>
+      </form>
+
+      <p class="muted small" style="margin-top:24px;">
+        切换身份（演示用）：<a href="#/submit?as=anonymous">匿名</a> ｜ <a href="#/submit?as=verified">认证</a>
+      </p>
+    </section>
+
+    <!-- 视图三：审核 -->
+    <section id="view-admin" hidden>
+      <h2>审核入口</h2>
+      <p class="muted">所有帖子发布后都先到这里（Day 13 起认证用户也不例外）。通过 → 上首页；拒绝 → 删除。按「观点 / 提问」分组显示。</p>
+      <div id="adminList" class="toolbar-wrap"></div>
+    </section>
+
+    <!-- 视图四：帖子详情（第二级，地址 #/post/p001） -->
+    <section id="view-post" hidden>
+      <!-- Day 14 最小修复：常驻返回按钮——从站内进来的原路后退，直接打开详情页的回首页 -->
+      <div class="post-topbar">
+        <button id="backBtn" class="back-btn" type="button">← 返回</button>
+      </div>
+      <article id="post">加载中…</article>
+
+      <section>
+        <h3>评论</h3>
+        <div id="comments"></div>
+        <form id="commentForm" novalidate>
+          <label for="cAuthor">昵称（可留空，默认"匿名"）</label>
+          <div class="nickname-row">
+            <span id="avatarPreview" class="avatar" title="你的头像会随昵称变化"></span>
+            <input id="cAuthor" type="text" maxlength="40" placeholder="匿名">
+          </div>
+          <label for="cBody">内容</label>
+          <textarea id="cBody" maxlength="1000" required placeholder="说点什么…"></textarea>
+          <div class="toolbar">
+            <button type="submit">提交评论</button>
+            <span id="cStatus" class="small muted"></span>
+          </div>
+        </form>
+      </section>
+    </section>
+
+  </main>
+
+  <!-- 举报弹窗（Day 8 mock 版：只在前端演示，数据不真实上传，第 3 周接真 API 时升级） -->
+  <div id="reportModal" class="modal-overlay hidden">
+    <div class="modal-card">
+      <h3>举报这条内容</h3>
+      <div id="reportReasons"></div>
+      <div class="toolbar" style="margin-top:14px;margin-bottom:0">
+        <button id="reportSubmit" type="button">提交举报</button>
+        <button id="reportCancel" class="secondary" type="button">取消</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ================== 视图切换（Day 13：hash 路由）==================
+    // 为什么用 hash：# 后面的部分变化时浏览器不向服务器发请求、不刷新页面，
+    // JS 监听 hashchange 自己换视图。服务器零改动，刷新也不 404。
+    function parseHash() {
+      const raw = (location.hash || '#/').slice(1);  // 去掉开头的 #
+      const [path, query] = raw.split('?');
+      return {
+        path: path || '/',
+        params: new URLSearchParams(query || '')
+      };
+    }
+
+    // 路由表：地址 → 显示哪个 section、进视图时执行什么、顶栏哪个入口高亮
+    let lastAppPath = null;      // Day 14：上一次路由所在的站内路径（首次路由前是 null）
+    let postCameFromApp = false; // Day 14：当前详情页是否由站内导航进入
+    const VIEWS = {
+      '/':       { el: 'view-home',   title: '项目 · 首页', nav: 'home',   onShow: () => loadList() },
+      '/submit': { el: 'view-submit', title: '发帖',       nav: 'submit', onShow: (params) => initIdentity(params) },
+      '/admin':  { el: 'view-admin',  title: '审核入口',   nav: 'admin',  onShow: () => loadAdmin() },
+      '/post':   { el: 'view-post',   title: '帖子详情',   nav: 'home',   onShow: (postId) => loadPost(postId) },
+    };
+
+    // 地址 → 视图。/post/p001 是带参数的动态地址（第二级），
+    // 静态表查不到，单独用正则把帖子 id 抠出来
+    function resolve(path) {
+      const m = path.match(/^\/post\/([\w-]+)$/);
+      if (m) return { view: VIEWS['/post'], postId: m[1] };
+      return { view: VIEWS[path] || VIEWS['/'] };  // 未知地址回落到首页
+    }
+
+    function route() {
+      const { path, params } = parseHash();
+      const { view, postId } = resolve(path);
+      // Day 14：记录这次进详情页的来路——站内导航过来的可以 history.back() 原路返回；
+      // 直接打开 #/post/xxx（新标签/外链）没有站内上一页，返回键改成回首页
+      if (view === VIEWS['/post']) postCameFromApp = (lastAppPath !== null);
+      lastAppPath = path;
+      // 显示目标视图，藏掉其余视图
+      for (const key of Object.keys(VIEWS)) {
+        document.getElementById(VIEWS[key].el).hidden = (VIEWS[key].el !== view.el);
+      }
+      // 状态同步：顶栏导航高亮跟随当前视图（详情页算首页下的第二级，高亮「首页」）
+      document.querySelectorAll('header nav a[data-nav]').forEach(a => {
+        const active = a.dataset.nav === view.nav;
+        a.classList.toggle('active', active);
+        if (active) a.setAttribute('aria-current', 'page');
+        else a.removeAttribute('aria-current');
+      });
+      document.title = view.title;
+      view.onShow(postId !== undefined ? postId : params);
+    }
+
+    window.addEventListener('hashchange', route);
+    // 注意：route() 的首次调用放在脚本最末尾——
+    // 它会同步执行各视图的 onShow，必须等所有 let/const 声明都跑完再启动，
+    // 否则提前碰到现在还没声明的变量会抛「暂时性死区」错误。
+
+    // ================== Day 20：接口地址集中管理 ==================
+    // 为什么要有这个常量（Day 20 学到的东西）：
+    //   页面跑在静态托管域名（...webapps.tcloudbase.com），接口跑在 HTTP 网关域名
+    //   （...ap-shanghai.app.tcloudbase.com）。两个域名不同 → 浏览器认为是「别人的网站」
+    //   → 就算接口返回了数据，浏览器也会按同源策略拦下来（这就是跨域）。
+    //   所以前端不能写fetch('/api/posts') 这种相对路径——那会把请求发到静态托管自己的域名上，
+    //   而静态托管里根本没有/api/ 这个东西，必然 404，然后页面悄悄回退去读 posts.json 假数据。
+    //   必须写完整公网地址，请求才发得对地方。
+    //
+    // ⚠️ 换静态托管项目后这个地址可能跟着变（Day 15 踩过：每部署一次地址就换一个）。
+    //   看到首页数据不对时，第一件事就是回来核对这个常量。
+    const API_BASE = 'https://broken-api-day26.invalid/api';
+
+    // ================== 视图一：首页（Day 8 三栏 + 四种状态）==================
+    // 帖子分类（Day 8 定，参考主流职场讨论话题归纳为 6 类）
+    const CATEGORIES = ['求职面试', '职场新人', '人际沟通', '薪资福利', '晋升发展', '劳动权益'];
+
+    let allPosts = [];      // 成功加载后存在这里，切换分类不用重新请求
+    let currentCat = 'all'; // 当前选中的分类，'all' 表示全部
+
+    // Day 15 定的 mock 版数据源：先试真接口 /api/posts（现在指向公网网关），
+    // 拿不到就回退读同目录的 posts.json。
+    // 回退时对齐 server.js 的行为：只取已过审的、按发布时间倒序。
+    //⚠️ Day 20 补充：这个回退在公网上容易被误判成「接口挂了」——
+    //   因为它不报错，静悄悄换成假数据，页面照常渲染得出帖子。
+    //   所以判断有没有接上真数据，要看控制台里的请求地址和返回内容，不能只看页面有没有帖子。
+    let mockPostsCache = null;
+    async function fetchPosts() {
+      try {
+        const r = await fetch(API_BASE + '/posts');
+        if (r.ok) return await r.json();
+      } catch (e) { /* 网络错误也落到下面的 posts.json 回退 */ }
+      if (!mockPostsCache) {
+        const r2 = await fetch('posts.json');
+        if (!r2.ok) throw new Error('接口不可用，posts.json 也读不到（' + r2.status + '）');
+        const raw = await r2.json();
+        mockPostsCache = {
+          posts: raw.posts
+            .filter(x => !x.pending)
+            .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+        };
+      }
+      return mockPostsCache;
+    }
+
+    // 页面四种状态：加载中 → 成功（列表+热门榜+分类）/ 空 / 错误
+    async function loadList() {
+      const root = document.getElementById('list');
+      const hotRoot = document.getElementById('hotList');
+      const catRoot = document.getElementById('cats');
+      // 状态一：加载中（骨架屏，加载完成后自动被替换）
+      root.innerHTML = '<div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div>';
+      hotRoot.innerHTML = '<p class="muted small">加载中…</p>';
+      catRoot.innerHTML = '<p class="muted small">加载中…</p>';
+      loadTrends();   // Day 17：热搜和帖子列表并行加载，互不阻塞
+      try {
+        const data = await fetchPosts();
+        if (!data.posts.length) {
+          // 状态二：空（有页面、没数据）
+          root.innerHTML = '<div class="state-box">暂无帖子，<a href="#/submit">发第一帖</a>试试</div>';
+          return;
+        }
+        // 状态三：成功，用 posts.json 里的假数据渲染三块内容
+        allPosts = data.posts;
+        renderHotList();
+        renderCats();
+        renderCards();
+      } catch (e) {
+        // 状态四：错误（网络断开、后端没启动等），给用户重试的机会
+        // Day 23：不再显示 'TypeError: Failed to fetch'，换成中文人话；原文留在控制台供排查
+        const fe = friendlyError(e, '加载失败，请稍后重试');
+        console.warn('[首页]加载列表失败：', fe.detail);
+        const err =
+          '<div class="state-box error">' +
+          '<div>' + escapeHtml(fe.text) + '</div>' +
+          '<button onclick="loadList()">重试</button>' +
+          '</div>';
+        root.innerHTML = err;
+        hotRoot.innerHTML = '<p class="muted small">加载失败</p>';
+        catRoot.innerHTML = '<p class="muted small">加载失败</p>';
+      }
+    }
+
+    // 左栏：热门榜，按浏览量取前 5（微博热搜式排行）
+    function renderHotList() {
+      const top = [...allPosts]
+        .sort((a, b) => (b.views || 0) - (a.views || 0))
+        .slice(0, 5);
+      document.getElementById('hotList').innerHTML = top.map((p, i) => `
+        <a class="hot-item" href="#/post/${p.id}" title="${escapeHtml(p.title)}">
+          <span class="rank ${i < 3 ? 'r' + (i + 1) : ''}">${i + 1}</span>
+          <span class="hot-title">${escapeHtml(p.title)}</span>
+          <span class="hot-meta">${fmtViews(p.views)}</span>
+        </a>
+      `).join('');
+    }
+
+    // ================== Day 17：今日热搜（真实数据）==================
+    // 数据来自云函数 GET /api/hot，读的是 Postgres 的 trends 表（微博/B站/抖音真实热搜）。
+    // 和上面的「热门榜」是两回事：热门榜排的是本站帖子，这里排的是全网热搜词条。
+    const TREND_PLATFORMS = [
+      { key: 'weibo',    label: '微博' },
+      { key: 'bilibili', label: 'B站' },
+      { key: 'douyin',   label: '抖音' },
+    ];
+    // Day 20 起跟着 API_BASE 走，不再单独硬编码整条地址
+    const TRENDS_API = API_BASE + '/hot';
+
+    let trendsData = [];              // /api/hot 返回的原始行
+    let trendsPlatform = 'weibo';     // 当前选中的平台标签
+
+    // 热度值格式化：微博/B站是百万级数字，抖音是千万级，统一成「1.2万」这种人类看得懂的写法
+    function fmtHot(n) {
+      const v = Number(n) || 0;
+      if (v >= 100000000) return (v / 100000000).toFixed(1) + '亿';
+      if (v >= 10000) return (v / 10000).toFixed(1) + '万';
+      return String(v);
+    }
+
+    // 拉取真实热搜。失败不抛错——热搜是锦上添花，不该拖垮整个首页
+    async function loadTrends() {
+      const listRoot = document.getElementById('trendsList');
+      const tabsRoot = document.getElementById('trendsTabs');
+      const dateRoot = document.getElementById('trendsDate');
+      try {
+        const r = await fetch(TRENDS_API);
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const d = await r.json();
+        if (!d.ok) throw new Error(d.error || '接口返回 ok:false');
+        trendsData = d.data || [];
+        dateRoot.textContent = d.date + '（北京时间）';
+        // 标签上带条数，一眼看出哪个平台有数据
+        tabsRoot.innerHTML = TREND_PLATFORMS.map(p => {
+          const c = trendsData.filter(x => x.platform === p.key).length;
+          return `<button class="trends-tab ${trendsPlatform === p.key ? 'active' : ''}" data-p="${p.key}">${p.label}${c ? ' ' + c : ''}</button>`;
+        }).join('');
+        tabsRoot.querySelectorAll('.trends-tab').forEach(btn => {
+          btn.addEventListener('click', () => {
+            trendsPlatform = btn.dataset.p;
+            renderTrends();
+            // 重渲染会重建按钮，把焦点还给新按钮（沿用 Day 12 的无障碍修复思路）
+            const restored = tabsRoot.querySelector(`.trends-tab[data-p="${trendsPlatform}"]`);
+            if (restored) restored.focus({ preventScroll: true });
+          });
+        });
+        renderTrends();
+      } catch (e) {
+        // 降级（附录 F）：真实源不可用时不假装有数据，明确标注，页面其余部分照常显示
+        dateRoot.textContent = '';
+        document.getElementById('trendsTabs').innerHTML = '';
+        listRoot.innerHTML =
+          '<div class="trends-fallback">真实热搜暂不可用，以下为「示例数据」</div>' +
+          '<p class="trends-empty">接口未返回数据（' + escapeHtml(friendlyText(e, '未知原因')) + '）</p>';
+      }
+    }
+
+    // 渲染当前平台的前 5 条（和热门榜保持一致的条数，纵向不撑太长）
+    function renderTrends() {
+      // Day 21 修：按钮高亮要跟着 tabs 一起换。之前 active 只在 loadTrends 生成 HTML 时写死一次，
+      // 点别的平台时列表换了、按钮还是旧平台深色——同伴交叉验证时发现的。
+      // 不重建按钮（那样会丢焦点、还得重绑事件），只翻 class，两边永远同源。
+      document.getElementById('trendsTabs').querySelectorAll('.trends-tab').forEach(b => {
+        b.classList.toggle('active', b.dataset.p === trendsPlatform);
+      });
+
+      const root = document.getElementById('trendsList');
+      const rows = trendsData
+        .filter(x => x.platform === trendsPlatform)
+        .sort((a, b) => (a.rank || 0) - (b.rank || 0))
+        .slice(0, 5);
+      if (!rows.length) {
+        root.innerHTML = '<p class="trends-empty">该平台今日暂无数据</p>';
+        return;
+      }
+      root.innerHTML = rows.map((x, i) => `
+        <div class="trends-item" title="${escapeHtml(x.title)}">
+          <span class="rank ${i < 3 ? 'r' + (i + 1) : ''}">${i + 1}</span>
+          <span class="hot-title">${escapeHtml(x.title)}</span>
+          <span class="hot-meta">${fmtHot(x.hot)}</span>
+        </div>
+      `).join('');
+    }
+
+    // 右栏：分类筛选，每个分类显示帖子数
+    function renderCats() {      const catRoot = document.getElementById('cats');
+      const countOf = c => allPosts.filter(p => p.category === c).length;
+      const chips = [
+        `<button class="chip ${currentCat === 'all' ? 'active' : ''}" data-cat="all"><span>全部</span><span class="count">${allPosts.length}</span></button>`,
+        ...CATEGORIES.map(c => `
+          <button class="chip ${currentCat === c ? 'active' : ''}" data-cat="${c}">
+            <span>${c}</span><span class="count">${countOf(c)}</span>
+          </button>
+        `)
+      ];
+      catRoot.innerHTML = chips.join('');
+      catRoot.querySelectorAll('.chip').forEach(chip => {
+        chip.addEventListener('click', () => {
+          currentCat = chip.dataset.cat;
+          renderCats();   // 更新选中样式
+          renderCards();  // 重新渲染过滤后的列表
+          // 无障碍修复（Day 12）：重渲染会销毁旧按钮导致键盘焦点丢失，
+          // 把焦点还给重渲染后同一分类的新按钮（focus + preventScroll 防页面跳动）
+          const restored = catRoot.querySelector(`.chip[data-cat="${CSS.escape(currentCat)}"]`);
+          if (restored) restored.focus({ preventScroll: true });
+        });
+      });
+    }
+
+    // 中栏：帖子卡片，按当前分类过滤
+    function renderCards() {
+      const root = document.getElementById('list');
+      const posts = currentCat === 'all'
+        ? allPosts
+        : allPosts.filter(p => p.category === currentCat);
+      if (!posts.length) {
+        root.innerHTML = '<div class="state-box">「' + escapeHtml(currentCat) + '」还没有帖子</div>';
+        return;
+      }
+      root.innerHTML = '';
+      for (const p of posts) {
+        const typeLabel = p.type === 'opinion' ? '观点' : '提问';
+        const card = document.createElement('div');
+        card.className = 'card';
+        card.innerHTML = `
+          <a class="title" href="#/post/${p.id}">${escapeHtml(p.title)}</a>
+          <div class="meta">
+            <span class="badge ${p.type}">${typeLabel}</span>
+            ${p.authorVerified ? '<span class="badge verified">✓ 已认证</span>' : '<span class="badge anonymous">未认证</span>'}
+            <span class="badge cat">${escapeHtml(p.category || '未分类')}</span>
+            <span class="muted">${escapeHtml(p.author)} · ${formatDate(p.createdAt)}</span>
+            <span class="muted"> · ${(p.comments || []).length} 条评论</span>
+          </div>
+        `;
+        root.appendChild(card);
+      }
+    }
+
+    function fmtViews(v) {
+      v = v || 0;
+      return v >= 1000 ? (v / 1000).toFixed(1).replace(/\.0$/, '') + 'k' : String(v);
+    }
+
+    // ================== 视图二：发帖（从 submit.html 迁入）==================
+    let as = 'anonymous';  // 当前身份，进视图时由 initIdentity 按地址设置
+
+    // 分类下拉：选项来自首页同一份 CATEGORIES 常量，只维护一处
+    const catSel = document.getElementById('category');
+    for (const c of CATEGORIES) {
+      catSel.add(new Option(c, c));
+    }
+
+    function initIdentity(params) {
+      as = params.get('as') === 'verified' ? 'verified' : 'anonymous';
+      const bar = document.getElementById('identityBar');
+      const sel = document.getElementById('type');
+      if (as === 'verified') {
+        bar.innerHTML = '当前身份：<code>已认证用户</code>（#/submit?as=verified）。可发「观点」或「提问」，发布后进入审核，通过后上首页。';
+        sel.disabled = false;
+      } else {
+        bar.innerHTML = '当前身份：<code>未认证用户</code>（默认 anonymous）。只能发「提问」帖，发布后进入审核。';
+        sel.value = 'question';
+        sel.disabled = true;
+      }
+    }
+
+    // Day 10：表单提示分状态显示——错误=淡粉框+抖两下，成功=蓝框，过程=普通灰字
+    function setStatus(text, kind) {
+      const status = document.getElementById('status');
+      status.textContent = text;
+      if (kind === 'error') {
+        status.className = '';            // 先清掉类
+        void status.offsetWidth;          // 强制浏览器重排，这样重复报错时抖动能重新播放
+        status.className = 'notice error shake';
+      } else if (kind === 'ok') {
+        status.className = 'notice ok';
+      } else {
+        status.className = 'small muted';
+      }
+    }
+
+    document.getElementById('postForm').addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const sel = document.getElementById('type');
+      const type = sel.value;
+      const title = document.getElementById('title').value.trim();
+      const body = document.getElementById('body').value.trim();
+      const category = document.getElementById('category').value;
+      if (!title || !body) { setStatus('标题和正文都必填', 'error'); return; }
+      if (!category) { setStatus('请选择分类', 'error'); return; }
+      setStatus('提交中…');
+      try {
+        // Day 24 修：原来这里是相对路径 fetch('/api/posts?as=' + as, ...)，
+        //   请求打到静态托管自己名下，那儿没有 /api/ → 必然 404，
+        //   点「发布」永远失败（同 Day 21 详情页/发评论同款病根，Day 20 改 API_BASE 时漏了这几段）。
+        //   改成 API_BASE 绝对地址，和上面fetchPosts / loadPost 同一口径。
+        // ⚠️ 后端也需要有这条路由：Day 24 同时在云函数里补了 POST /posts（原先只有 GET/PATCH）。
+        const r = await fetch(API_BASE + '/posts?as=' + encodeURIComponent(as), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type, title, body, category })
+        });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) { setStatus('失败：' + (data.error || '服务器返回 ' + r.status + '，请稍后重试'), 'error'); return; }
+        // Day 13 规则变更：所有帖子（含认证用户）都要审核，通过后才会出现在首页
+        setStatus('已提交，等待审核（通过后才会出现在首页）。3 秒后回首页…', 'ok');
+        document.getElementById('title').value = '';
+        document.getElementById('body').value = '';
+        document.getElementById('category').value = '';
+        setTimeout(() => location.hash = '#/', 3000);
+      } catch (e) {
+        setStatus('失败：' + friendlyText(e, '请稍后重试'), 'error');
+      }
+    });
+
+    // ================== 视图三：审核（从 admin.html 迁入）==================
+    // Day 13：所有帖子都要审核，按「观点 / 提问」分组展示，方便分开把关
+    async function loadAdmin() {
+      const root = document.getElementById('adminList');
+      root.innerHTML = '<p class="muted">加载中…</p>';
+      try {
+        const r = await fetch('/api/admin/pending');
+        const data = await r.json();
+        if (!data.posts.length) {
+          root.innerHTML = '<p class="muted">暂无待审核帖子。</p>';
+          return;
+        }
+        root.innerHTML = '';
+        const groups = [
+          { key: 'opinion', label: '观点' },
+          { key: 'question', label: '提问' },
+        ];
+        for (const g of groups) {
+          const list = data.posts.filter(p => p.type === g.key);
+          const h = document.createElement('h3');
+          h.className = 'group-title';
+          h.textContent = g.label + '（' + list.length + '）';
+          root.appendChild(h);
+          if (!list.length) {
+            const empty = document.createElement('p');
+            empty.className = 'muted small group-empty';
+            empty.textContent = '（无待审核的' + g.label + '帖）';
+            root.appendChild(empty);
+            continue;
+          }
+          for (const p of list) {
+            const card = document.createElement('div');
+            card.className = 'card';
+            card.innerHTML = `
+              <h3>${escapeHtml(p.title)}</h3>
+              <div class="meta">
+                <span class="badge pending">待审核</span>
+                <span class="badge ${p.type}">${g.label}</span>
+                ${p.authorVerified ? '<span class="badge verified">✓ 已认证</span>' : '<span class="badge anonymous">未认证</span>'}
+                <span class="badge cat">${escapeHtml(p.category || '未分类')}</span>
+                <span class="muted">${escapeHtml(p.author)} · ${formatDate(p.createdAt)}</span>
+              </div>
+              <div class="post-body">${escapeHtml(p.body)}</div>
+              <div class="toolbar">
+                <button data-id="${p.id}" data-action="approve">通过</button>
+                <button data-id="${p.id}" data-action="reject" class="danger">拒绝</button>
+              </div>
+            `;
+            root.appendChild(card);
+          }
+        }
+        root.querySelectorAll('button[data-action]').forEach(btn => {
+          btn.addEventListener('click', () => onAction(btn.dataset.id, btn.dataset.action));
+        });
+      } catch (e) {
+        // Day 23：英文异常换成中文人话（原文留在控制台）
+        root.innerHTML = '<p class="notice error">' + escapeHtml(friendlyText(e, '加载失败，请稍后重试')) + '</p>';
+      }
+    }
+
+    async function onAction(id, action) {
+      const label = action === 'approve' ? '通过' : '拒绝';
+      if (!confirm('确认要「' + label + '」这个帖子吗？' + (action === 'reject' ? '（会被删除）' : ''))) return;
+      try {
+        const r = await fetch('/api/admin/posts/' + encodeURIComponent(id) + '/' + action, {
+          method: 'POST',
+        });
+        if (!r.ok) {
+          const err = await r.json().catch(() => ({}));
+          // Day 23：r.status 是数字（500这种），直接显示等于给用户看数字，改成中文；
+          // 后端自己给的中文 error 优先用它。
+          alert('操作失败：' + (err.error || '服务器返回 ' + r.status + '，请稍后重试'));
+          return;
+        }
+        await loadAdmin();
+      } catch (e) {
+        alert('操作失败：' + friendlyText(e, '请稍后重试'));
+      }
+    }
+
+    // ================== 视图四：帖子详情（从 post.html 迁入）==================
+    let currentPostId = null;  // 当前看的帖子，进视图时由路由设置
+
+    // Day 14：返回按钮——站内进来的原路后退（保留上一页状态），直开详情页的回首页
+    document.getElementById('backBtn').addEventListener('click', () => {
+      if (postCameFromApp) history.back();
+      else location.hash = '#/';
+    });
+
+    async function loadPost(postId) {
+      currentPostId = postId;
+      const root = document.getElementById('post');
+      try {
+        // Day 21 修：原来这里是相对路径 fetch('/api/posts/' + id)，
+        //   请求发到静态托管自己名下，那儿没有 /api/ → 必然 404 →
+        //   p 是 null → 下面读 p.author 就抛「Cannot read properties of null」。
+        //   同伴交叉验证实测到这个报错（Day 21，详见 WEEK3_REVIEW.md）。
+        //   改成 API_BASE 绝对地址，和上面fetchPosts 同一口径。
+        //⚠️ 地址形态：网关不支持 /api/posts/{id} 这种路径参数（实测），
+        //   所以详情走固定路径 /api/post?id=xx，编号放 query。
+        let p = null;
+        try {
+          const r = await fetch(API_BASE + '/post?id=' + encodeURIComponent(postId));
+          if (r.ok) p = (await r.json()).post;
+        } catch (e) { /* 落到 posts.json 回退 */ }
+        if (!p) {
+          const data = await fetchPosts();
+          p = data.posts.find(x => x.id === postId) || null;
+        }
+        if (!p) {
+          root.innerHTML = '<p class="notice error">帖子不存在或还在审核中。</p>';
+          return;
+        }
+        const typeLabel = p.type === 'opinion' ? '观点' : '提问';
+        root.innerHTML = `
+          <h2>${escapeHtml(p.title)}</h2>
+          <div class="meta">
+            <span class="badge ${p.type}">${typeLabel}</span>
+            ${p.authorVerified ? '<span class="badge verified">✓ 已认证</span>' : '<span class="badge anonymous">未认证</span>'}
+            <span class="muted">${escapeHtml(p.author)} · ${formatDate(p.createdAt)}</span>
+          </div>
+          <div class="post-body">${escapeHtml(p.body)}</div>
+          <div class="post-footer">
+            <button id="copyBtn" class="copy-btn" type="button">复制链接</button>
+            <button id="reportBtn" class="report-btn" type="button">举报</button>
+          </div>
+        `;
+        renderComments(p.comments || []);
+      } catch (e) {
+        // Day 23：英文异常换成中文人话（原文留在控制台）
+        root.innerHTML = '<p class="notice error">' + escapeHtml(friendlyText(e, '帖子加载失败，请稍后重试')) + '</p>';
+      }
+    }
+
+    // 头像生成：昵称首字 + 按昵称哈希分配的冷色圆底
+    // 同一个昵称永远得到同一个颜色（没有登录系统，用这个办法保证头像稳定）
+    const AVATAR_COLORS = ['#1d4f8c', '#2f6fb2', '#146e82', '#3a6e8c', '#4c5f7d', '#64748b'];
+    function avatarFor(name) {
+      const n = (name && name.trim()) || '匿名';
+      let h = 0;
+      for (const ch of n) h = (h * 31 + ch.codePointAt(0)) >>> 0;
+      return { color: AVATAR_COLORS[h % AVATAR_COLORS.length], letter: [...n][0].toUpperCase() };
+    }
+
+    function renderComments(list) {
+      const root = document.getElementById('comments');
+      if (!list.length) {
+        root.innerHTML = '<div class="state-box">还没有评论，来抢沙发</div>';
+        return;
+      }
+      root.innerHTML = list.map(c => {
+        const a = avatarFor(c.author);
+        return `
+          <div class="comment">
+            <span class="avatar" style="background:${a.color}">${escapeHtml(a.letter)}</span>
+            <div class="comment-main">
+              <div><span class="author">${escapeHtml(c.author)}</span><span class="muted small">${formatDate(c.createdAt)}</span></div>
+              <div>${escapeHtml(c.body)}</div>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    // 评论框的实时头像预览：输入昵称时头像跟着变
+    const cAuthorInput = document.getElementById('cAuthor');
+    const avatarPreview = document.getElementById('avatarPreview');
+    function updateAvatarPreview() {
+      const a = avatarFor(cAuthorInput.value || '匿名');
+      avatarPreview.style.background = a.color;
+      avatarPreview.textContent = a.letter;
+    }
+    cAuthorInput.addEventListener('input', updateAvatarPreview);
+    updateAvatarPreview();
+
+    // Day 10：评论提示和发帖页统一——错误=淡粉框+抖两下，成功=蓝框，过程=普通灰字
+    const cStatusEl = document.getElementById('cStatus');
+    function setCStatus(text, kind) {
+      cStatusEl.textContent = text;
+      if (kind === 'error') {
+        cStatusEl.className = '';
+        void cStatusEl.offsetWidth;
+        cStatusEl.className = 'notice error shake';
+      } else if (kind === 'ok') {
+        cStatusEl.className = 'notice ok';
+      } else {
+        cStatusEl.className = 'small muted';
+      }
+    }
+
+    document.getElementById('commentForm').addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const body = document.getElementById('cBody').value.trim();
+      const author = document.getElementById('cAuthor').value.trim();
+      if (!body) { setCStatus('内容不能为空', 'error'); return; }
+      setCStatus('提交中…');
+      try {
+        // Day 21 修：原来这里是相对路径 '/api/posts/' + id + '/comments'，
+        //   请求发到静态托管自己名下（那儿没有 /api/）→ 必然 404，
+        //   同伴实测「发评论提交失败」。改成 API_BASE 绝对地址。
+        // ⚠️ 地址形态：网关不支持 /api/posts/{id}/comments 这种路径参数（实测），
+        //   改成固定路径 /api/comments，帖子编号放请求体的 post_id 字段。
+        const r = await fetch(API_BASE + '/comments', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ post_id: currentPostId, author, body })
+        });
+        if (!r.ok) {
+          const err = await r.json().catch(() => ({}));
+          setCStatus('失败：' + (err.error || '服务器返回 ' + r.status + '，请稍后重试'), 'error');
+          return;
+        }
+        document.getElementById('cBody').value = '';
+        setCStatus('已提交', 'ok');
+        await loadPost(currentPostId);
+      } catch (e) {
+        // Day 23：e.message 是英文（Failed to fetch / TypeError...），换成人话
+        setCStatus('失败：' + friendlyText(e, '请稍后重试'), 'error');
+      }
+    });
+
+    // ---------- 复制链接（Day 11：反馈长在动作点上——按钮自己变样） ----------
+    // 和举报按钮同理：按钮是帖子加载后才渲染的，用事件委托
+    let copyTimer = null;
+    document.addEventListener('click', async ev => {
+      const btn = ev.target && ev.target.closest && ev.target.closest('#copyBtn');
+      if (!btn) return;
+      const url = location.href;
+      let ok = true;
+      try {
+        await navigator.clipboard.writeText(url);
+      } catch (e) {
+        // 兜底：非安全上下文（比如 http 非 localhost）时 clipboard API 不可用，
+        // 退回老办法——临时塞一个透明 textarea 选中后复制
+        const ta = document.createElement('textarea');
+        ta.value = url;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        try { ok = document.execCommand('copy'); } catch (e2) { ok = false; }
+        ta.remove();
+      }
+      // 连点保护：先清掉上一次的恢复计时，状态从头算，连点不会错乱
+      clearTimeout(copyTimer);
+      if (ok) {
+        btn.classList.add('copied');
+        btn.textContent = '✓ 已复制';
+      } else {
+        btn.textContent = '复制失败，请手动复制地址栏';
+      }
+      copyTimer = setTimeout(() => {
+        btn.classList.remove('copied');
+        btn.textContent = '复制链接';
+      }, 1500);
+    });
+
+    // ---------- 举报（mock：前端演示版，不接真实后台） ----------
+    const REPORT_REASONS = ['垃圾广告', '人身攻击', '敏感话题', '虚假信息', '其他'];
+    let reportReason = REPORT_REASONS[0];
+
+    const reportModal = document.getElementById('reportModal');
+    document.getElementById('reportReasons').innerHTML = REPORT_REASONS.map((r, i) => `
+      <label class="reason"><input type="radio" name="reason" value="${r}" ${i === 0 ? 'checked' : ''}>${r}</label>
+    `).join('');
+    document.getElementById('reportReasons').addEventListener('change', ev => {
+      reportReason = ev.target.value;
+    });
+
+    // 举报按钮是帖子加载后才渲染出来的，脚本先于它执行，
+    // 所以这里用事件委托：监听整个页面，点到 id 为 reportBtn 的元素才算数
+    document.addEventListener('click', ev => {
+      if (ev.target && ev.target.id === 'reportBtn') reportModal.classList.remove('hidden');
+    });
+    document.getElementById('reportCancel').addEventListener('click', () => {
+      reportModal.classList.add('hidden');
+    });
+    reportModal.addEventListener('click', ev => {
+      if (ev.target === reportModal) reportModal.classList.add('hidden'); // 点遮罩关闭
+    });
+    document.getElementById('reportSubmit').addEventListener('click', () => {
+      reportModal.classList.add('hidden');
+      const footer = document.querySelector('.post-footer');
+      const tip = document.createElement('p');
+      tip.className = 'notice ok report-done';
+      tip.textContent = '已收到举报（' + reportReason + '）。演示版说明：举报数据暂不会真实上传，第 3 周接 API 后生效。';
+      footer.after(tip);
+      setTimeout(() => tip.remove(), 5000);
+    });
+
+    // ================== 公共工具 ==================
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g, c => ({
+        '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+      }[c]));
+    }
+
+    // ================== Day 23：把裸报错翻成人话 ==================
+    // 问题：以前所有错误提示都是把JS 异常对象直接字符串化贴到页面上，
+    //   用户看到的是 'TypeError: Failed to fetch'、'Unexpected token < in JSON' 这类英文，
+    //   既看不懂也不知道下一步该干嘛。
+    // 做法：按「错在哪」分类，换成一句能指路的提示；顺手把英文原文留在 detail 里，
+    //   开发者需要时在控制台还能看到，页面上不再出现英文黑话。
+    // ⚠️ 边界：后端自己返回的中文 error（比如「帖子不存在或还在审核中」）直接原样透传，
+    //   不在这里二次加工——那已经是人话了。
+    function friendlyError(e, fallback) {
+      const raw = (e && (e.message || e.toString())) || String(e || '');
+      // 情况一：网络层失败。fetch 抛的错没有具体原因，只有类型，
+      //   但这一类是最常见的（断网/断网/跨域被拦/后端没启动），必须给出可操作的下一步。
+      if (/Failed to fetch|NetworkError|Load failed/i.test(raw)) {
+        return { text: '连不上服务器，请检查网络后重试', detail: raw };
+      }
+      // 情况二：请求超时（我们自己设了超时上限，或网关掐了）。
+      if (/timeout|abort/i.test(raw)) {
+        return { text: '服务器响应太慢了，请稍后重试', detail: raw };
+      }
+      // 情况三：返回的不是 JSON。常见于请求打到了静态托管页面上（拿回一整张 HTML）。
+      if (/Unexpected token|is not valid JSON|JSON parse/i.test(raw)) {
+        return { text: '服务器返回的数据格式不对，请稍后重试', detail: raw };
+      }
+      // 情况四：认不出来的，直接给通用文案，原文留给开发者。
+      return { text: fallback || '出了点问题，请稍后重试', detail: raw };
+    }
+    // 只要一句人话的时候用这个；需要在控制台留线索的场合用上面那个拿 detail
+    function friendlyText(e, fallback) {
+      return friendlyError(e, fallback).text;
+    }
+    function formatDate(iso) {
+      try {
+        const d = new Date(iso);
+        const pad = n => String(n).padStart(2, '0');
+        return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+      } catch (e) { return iso; }
+    }
+
+    // 一切就绪，启动路由（渲染当前地址对应的视图）
+    route();
+  </script>
+</body>
+</html>

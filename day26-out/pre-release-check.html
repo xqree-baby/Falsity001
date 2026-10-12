@@ -1,0 +1,64 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8">
+<title>release-check 发布前检查结果</title><style>
+*{box-sizing:border-box}body{margin:0;padding:28px;background:#f2f5f9;color:#2b3442;
+font:14px/1.6 "Microsoft YaHei",sans-serif}
+h1{font-size:20px;margin:0 0 4px}.sub{color:#64748b;font-size:12px;margin-bottom:20px}
+.card{background:#fff;border:1px solid #d9e0ea;border-radius:10px;padding:16px 18px;margin-bottom:14px}
+.card.fail{border-left:4px solid #b04a66;background:#fceef2}
+.card.pass{border-left:4px solid #146e82}
+.hd{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+.badge{font-size:12px;padding:2px 9px;border-radius:20px;color:#fff;background:#146e82}
+.card.fail .badge{background:#b04a66}
+pre{margin:0;white-space:pre-wrap;font:12px/1.7 Consolas,monospace;color:#2b3442}
+ul{margin:8px 0 0;padding-left:20px;color:#64748b;font-size:12px}
+.noti{margin-top:18px;padding:13px 16px;background:#fff;border:1px dashed #d9e0ea;border-radius:8px;color:#64748b;font-size:12px}
+.verdict{margin-top:14px;padding:15px 18px;border-radius:10px;font-weight:bold;font-size:15px}
+.verdict.bad{background:#fceef2;color:#b04a66;border:1px solid #b04a66}
+.verdict.ok{background:#fff;color:#146e82;border:1px solid #146e82}
+.tbl{width:100%;border-collapse:collapse;background:#fff;border:1px solid #d9e0ea;border-radius:10px;overflow:hidden;margin-top:14px}
+th,td{padding:9px 14px;text-align:left;font-size:12px;border-bottom:1px solid #f2f5f9}
+th{background:#f2f5f9;color:#64748b;font-weight:normal}
+</style></head><body>
+<h1>发布前检查结果</h1>
+<div class="sub">release-check · 2026/10/12 13:35:14 · 已实现范围 C1+C2</div>
+<div class="card pass">
+      <div class="hd"><span class="badge">通过</span><b>C1 密钥泄漏</b></div>
+      <pre>扫描 53 个文件，命中 0 条；git 跟踪 73 个文件，其中 .env 类 0 个</pre>
+      <ul><li>已排除 7 类关键词的 9 处安全写法</li></ul>
+    </div><div class="card pass">
+      <div class="hd"><span class="badge">通过</span><b>C2 公网可达性</b></div>
+      <pre>接口 200 + JSON 合法；静态首页 200；ACAO 无重复</pre>
+      <ul><li>ACAO 头只有 1 个值（无重复配置）</li><li>探活只发 GET，未改动任何线上数据</li></ul>
+    </div>
+<table class="tbl"><tr><th>编号</th><th>检查项</th><th>状态</th><th>说明</th></tr>
+<tr><td>C3</td><td>接口契约一致</td><td style="color:#64748b">未实现</td><td style="color:#64748b">api-contract.md 写 14 条，index.js 实注册 11 条，差/admin/* 三条</td></tr><tr><td>C4</td><td>前端错误提示规范</td><td style="color:#64748b">未实现</td><td style="color:#64748b">四页 friendlyError / 裸状态码检查</td></tr><tr><td>C5</td><td>Git 工作区干净</td><td style="color:#64748b">未实现</td><td style="color:#64748b">工作区 + 远端一致性</td></tr>
+</table>
+<div class="verdict ok">结论：已实现项全部通过</div>
+<div class="noti">⚠️ <b>「通过」本身需要被验证。</b>一个只会在干净仓库上说「通过」的检查工具，和一个坏掉的检查工具，在结果上无法区分。<br>
+必须做过一次反向验证才算可信：故意注入一个已知问题 → 它报警 → 修掉 → 它安静。两头都成立才作数。</div>
+<pre style="margin-top:16px;color:#64748b">
+══════════════════════════════════════════════════════════
+release-check · 发布前检查   2026/10/12 13:35:14
+══════════════════════════════════════════════════════════
+
+[通过] C1 密钥泄漏
+----------------------------------------------------------
+  扫描 53 个文件，命中 0 条；git 跟踪 73 个文件，其中 .env 类 0 个
+  · 已排除 7 类关键词的 9 处安全写法
+
+[通过] C2 公网可达性
+----------------------------------------------------------
+  接口 200 + JSON 合法；静态首页 200；ACAO 无重复
+  · ACAO 头只有 1 个值（无重复配置）
+  · 探活只发 GET，未改动任何线上数据
+
+--- 未实现项（不算通过）---
+  [未实现] C3 接口契约一致 —— api-contract.md 写 14 条，index.js 实注册 11 条，差/admin/* 三条
+  [未实现] C4 前端错误提示规范 —— 四页 friendlyError / 裸状态码检查
+  [未实现] C5 Git 工作区干净 —— 工作区 + 远端一致性
+
+══════════════════════════════════════════════════════════
+结论：已实现项全部通过
+⚠️ 通过 ≠ Skill 可信。未经「故意弄坏」反向验证的通过，不作为证据。
+══════════════════════════════════════════════════════════</pre>
+</body></html>

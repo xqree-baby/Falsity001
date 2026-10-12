@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>发帖</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="app">
+    <div class="row">
+      <h1>项目 · 经验分享</h1>
+      <nav>
+        <a href="/">← 返回首页</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="container">
+    <h2>发帖</h2>
+
+    <div id="identityBar" class="identity-bar"></div>
+
+    <form id="postForm" novalidate>
+      <label for="type">帖子类型</label>
+      <select id="type">
+        <option value="opinion">观点（认证用户可选）</option>
+        <option value="question">提问</option>
+      </select>
+
+      <label for="title">标题</label>
+      <input id="title" type="text" maxlength="120" required placeholder="一句话说清楚你要表达什么">
+
+      <label for="body">正文</label>
+      <textarea id="body" maxlength="4000" required placeholder="展开说…"></textarea>
+
+      <div class="toolbar">
+        <button type="submit">发布</button>
+        <span id="status" class="small muted"></span>
+      </div>
+    </form>
+
+    <p class="muted small" style="margin-top:24px;">
+      切换身份（演示用）：<a href="/submit?as=anonymous">匿名</a> ｜ <a href="/submit?as=verified">认证</a>
+    </p>
+  </main>
+
+  <script>
+    const params = new URLSearchParams(location.search);
+    const as = params.get('as') === 'verified' ? 'verified' : 'anonymous';
+
+    const bar = document.getElementById('identityBar');
+    const sel = document.getElementById('type');
+    if (as === 'verified') {
+      bar.innerHTML = '当前身份：<code>已认证用户</code>（?as=verified）。可发「观点」或「提问」，发布后直接上首页。';
+      sel.disabled = false;
+    } else {
+      bar.innerHTML = '当前身份：<code>未认证用户</code>（默认 anonymous）。只能发「提问」帖，发布后进入审核。';
+      sel.value = 'question';
+      sel.disabled = true;
+    }
+
+    // Day 10：表单提示分状态显示——错误=淡粉框+抖两下，成功=蓝框，过程=普通灰字
+    const status = document.getElementById('status');
+    function setStatus(text, kind) {
+      status.textContent = text;
+      if (kind === 'error') {
+        status.className = '';            // 先清掉类
+        void status.offsetWidth;          // 强制浏览器重排，这样重复报错时抖动能重新播放
+        status.className = 'notice error shake';
+      } else if (kind === 'ok') {
+        status.className = 'notice ok';
+      } else {
+        status.className = 'small muted';
+      }
+    }
+
+    // Day 23：把裸报错翻成人话（与 index.html 同一份逻辑，四个页面各存一份是因为没有构建步骤）
+    // 改前：页面直接显示 'TypeError: Failed to fetch' 这类英文
+    function friendlyText(e, fallback) {
+      const raw = (e && (e.message || e.toString())) || String(e || '');
+      if (/Failed to fetch|NetworkError|Load failed/i.test(raw)) return '连不上服务器，请检查网络后重试';
+      if (/timeout|abort/i.test(raw)) return '服务器响应太慢了，请稍后重试';
+      if (/Unexpected token|is not valid JSON|JSON parse/i.test(raw)) return '服务器返回的数据格式不对，请稍后重试';
+      return fallback || '出了点问题，请稍后重试';
+    }
+
+    document.getElementById('postForm').addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const sel = document.getElementById('type');
+      const type = sel.value;
+      const title = document.getElementById('title').value.trim();
+      const body = document.getElementById('body').value.trim();
+      if (!title || !body) { setStatus('标题和正文都必填', 'error'); return; }
+      setStatus('提交中…');
+      try {
+        const r = await fetch('/api/posts?as=' + encodeURIComponent(as), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type, title, body })
+        });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) { setStatus('失败：' + (data.error || '服务器返回 ' + r.status + '，请稍后重试'), 'error'); return; }
+        if (data.pending) {
+          setStatus('已提交，等待审核（不会出现在首页）。3 秒后跳首页…', 'ok');
+          document.getElementById('title').value = '';
+          document.getElementById('body').value = '';
+          setTimeout(() => location.href = '/', 3000);
+        } else {
+          setStatus('已发布，2 秒后跳首页…', 'ok');
+          document.getElementById('title').value = '';
+          document.getElementById('body').value = '';
+          setTimeout(() => location.href = '/', 2000);
+        }
+      } catch (e) {
+        setStatus('失败：' + friendlyText(e, '请稍后重试'), 'error');
+      }
+    });
+  </script>
+</body>
+</html>
