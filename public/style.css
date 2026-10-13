@@ -78,12 +78,60 @@ header.app nav a {
   font-size: 14px;
   margin-left: 12px;
   transition: color .15s ease;
+  /* Day 27 修：窄屏下「审核入口」被折成两行竖字（「审」一行、「核入口」一行）。
+     原因就是这条链接没禁止换行，浏览器在 375px 里必须折。
+     顶栏每个标签都是一个完整词组，不该在词中间断开——先 nowrap，宽度不够就整条换行。 */
+  white-space: nowrap;
 }
 header.app nav a:hover { color: var(--c-blue-deep); }
 header.app nav a.active {
   color: var(--c-blue-deep);
   font-weight: 600;
   border-bottom: 2px solid var(--c-blue-deep);
+}
+
+/* Day 27 修：手机版发帖入口难找，真机实测确认的两个原因
+   ① 「匿名发帖」「认证发帖」两个链接文字只差两个字，挤在一起视觉上分不出哪个是"发帖"
+   ② 顶栏是 flex row + justify-content:space-between，窄屏下四组链接互相挤压
+   → 手机端把 nav 单独挪到一行、允许整条换行、给发帖链接加视觉区分。
+     只影响 ≤640px，手机上顶栏不再挤成一团。 */
+@media (max-width: 640px) {
+  header.app .row {
+    /* 允许换行：标题一行、导航一行，而不是硬挤在一起 */
+    flex-wrap: wrap;
+    row-gap: 6px;
+  }
+  /* Day 27 修：手机端整页能横向滚动，实测是 .side 撑出来的。
+     .side 在窄屏下宽度由内容决定（热门榜条目 384px > 375px 视口），
+     于是整页出现横向滚动条。grid/flex 子项默认 min-width:auto，
+     不显式给 0 就不会收缩 —— 这就是 flex/grid 布局最经典的坑。 */
+  .side,
+  .main,
+  .layout > * {
+    min-width: 0;
+  }
+  header.app nav {
+    flex-basis: 100%;   /* 强制 nav 独占一行 */
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 0;
+    border-top: 1px solid var(--c-line);
+    padding-top: 6px;
+  }
+  header.app nav a {
+    margin-left: 0;
+    margin-right: 14px;
+  }
+  /* 两个发帖入口做视觉区分：加底色 + 主色描边，让"能发帖"这件事一眼可见。
+     匿名/认证只是身份不同，不该长得一样——这是第三方试用实测指出的问题。 */
+  header.app nav a[data-nav="submit"] {
+    color: var(--c-blue-deep);
+    background: var(--c-blue-tint);
+    border: 1px solid var(--c-line);
+    border-radius: 999px;
+    padding: 4px 12px;
+    font-weight: 600;
+  }
 }
 
 /* ---------- Day 13：审核页「观点/提问」分组标题 ---------- */
