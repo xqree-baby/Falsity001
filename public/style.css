@@ -31,6 +31,23 @@
 /* ---------- 基础 ---------- */
 * { box-sizing: border-box; }
 
+/* Day 28 修：用户输入的长串（评论里贴网址最常见）撑破窄屏，整页横向滚动。
+   实测 375px 下溢出 65px、414px 下 26px，罪魁是一条评论里的完整 URL。
+   为什么 min-width:0 不够：它只允许 flex/grid 子项收缩容器，
+   但长串字符本身没有断点，仍会把内容顶出去。
+   anywhere 而不是 break-word：长 URL 里没有空格也没有连字符断点，
+   break-word 在这种情况下仍可能不生效；anywhere 会强制在任意字符间断行。
+   中英混排不受影响 —— 中文本来就在字间断行。 */
+.comment-main,
+.post-body,
+.card .title,
+.card-body,
+.hot-item,
+textarea,
+input {
+  overflow-wrap: anywhere;
+}
+
 body {
   margin: 0;
   font-family: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
